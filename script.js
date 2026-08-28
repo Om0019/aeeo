@@ -34,6 +34,23 @@ const DEFAULT_STREAMING_ADDONS = [
     }
 ];
 
+function getMediaType(item) {
+    if (!item) return 'movie';
+    const candidate = item.mediaType || item.media_type || item.content_type || item.type;
+    if (candidate) {
+        const lower = String(candidate).toLowerCase().trim();
+        if (lower === 'tv' || lower === 'series' || lower === 'show') return 'tv';
+        if (lower === 'movie') return 'movie';
+    }
+    if (item.first_air_date || item.number_of_seasons || item.number_of_episodes || item.seasons) {
+        return 'tv';
+    }
+    if (item.name && !item.title) {
+        return 'tv';
+    }
+    return 'movie';
+}
+
 // Initial Demo / Starter In-Progress Titles
 const INITIAL_CONTINUE_WATCHING = [
     {
@@ -45,6 +62,7 @@ const INITIAL_CONTINUE_WATCHING = [
         vote_average: 8.0,
         release_date: '2021',
         mediaType: 'movie',
+        media_type: 'movie',
         progress: 68,
         lastWatched: Date.now() - 3600000
     },
@@ -57,6 +75,7 @@ const INITIAL_CONTINUE_WATCHING = [
         vote_average: 8.2,
         release_date: '2024',
         mediaType: 'movie',
+        media_type: 'movie',
         progress: 42,
         lastWatched: Date.now() - 7200000
     },
@@ -67,8 +86,10 @@ const INITIAL_CONTINUE_WATCHING = [
         poster_path: '/uKvVjHNqB5VmOrdxqAt2V7JMrHG.jpg',
         backdrop_path: '/uDgy6hyPd82kOHh6I95FLtLnj6p.jpg',
         vote_average: 8.6,
+        first_air_date: '2023',
         release_date: '2023',
         mediaType: 'tv',
+        media_type: 'tv',
         progress: 85,
         lastWatched: Date.now() - 10800000
     }
@@ -80,7 +101,14 @@ try {
     if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-            initialCW = parsed;
+            initialCW = parsed.map(item => {
+                const type = getMediaType(item);
+                return {
+                    ...item,
+                    mediaType: type,
+                    media_type: type
+                };
+            });
         }
     }
 } catch (e) {
@@ -226,11 +254,6 @@ function getYear(item) {
     return date ? String(date).substring(0, 4) : '';
 }
 
-function getMediaType(item) {
-    if (item.media_type) return item.media_type;
-    return item.first_air_date || item.type === 'series' ? 'tv' : 'movie';
-}
-
 function getRating(item) {
     return item.vote_average ? Number(item.vote_average).toFixed(1) : 'N/A';
 }
@@ -238,7 +261,7 @@ function getRating(item) {
 // --- Watch Progress & Continue Watching Logic (Synced with Nuvio Cloud) ---
 function recordWatchProgress(item, progressPercent = 45) {
     const type = getMediaType(item);
-    const index = state.continueWatching.findIndex(i => i.id === item.id && i.mediaType === type);
+    const index = state.continueWatching.findIndex(i => i.id === item.id && (i.mediaType === type || i.media_type === type));
     
     // If 97% or more has been seen, remove it from Continue Watching
     if (progressPercent >= 97) {
@@ -260,7 +283,9 @@ function recordWatchProgress(item, progressPercent = 45) {
         backdrop_path: item.backdrop_path,
         vote_average: item.vote_average,
         release_date: item.release_date || item.first_air_date,
+        first_air_date: item.first_air_date,
         mediaType: type,
+        media_type: type,
         progress: Math.min(Math.max(progressPercent, 5), 96),
         lastWatched: Date.now()
     };
@@ -355,8 +380,18 @@ async function pullNuvioWatchProgress() {
             let rawId = String(item.content_id || item.item_id || item.id || '');
             if (rawId.startsWith('tmdb:')) rawId = rawId.replace('tmdb:', '');
             
-            let mediaType = item.content_type || item.media_type || 'movie';
-            if (mediaType === 'series') mediaType = 'tv';
+            let isSeries = false;
+            if (rawId.includes(':')) {
+                isSeries = true;
+                rawId = rawId.split(':')[0];
+            }
+
+            let mediaType = item.content_type || item.media_type;
+            if (!mediaType) {
+                mediaType = isSeries ? 'tv' : 'movie';
+            } else {
+                mediaType = (mediaType === 'series' || mediaType === 'tv') ? 'tv' : 'movie';
+            }
 
             let progress = item.progress;
             if (!progress && item.duration && item.position) {
@@ -368,8 +403,15 @@ async function pullNuvioWatchProgress() {
             if (!meta && rawId) {
                 if (rawId.startsWith('tt')) {
                     const findData = await fetchTMDB(`/find/${rawId}`, { external_source: 'imdb_id' });
-                    const resList = (mediaType === 'tv' ? findData?.tv_results : findData?.movie_results) || findData?.movie_results;
-                    if (resList && resList.length > 0) meta = resList[0];
+                    if (findData) {
+                        if (findData.tv_results && findData.tv_results.length > 0) {
+                            meta = findData.tv_results[0];
+                            mediaType = 'tv';
+                        } else if (findData.movie_results && findData.movie_results.length > 0) {
+                            meta = findData.movie_results[0];
+                            mediaType = 'movie';
+                        }
+                    }
                 } else if (!isNaN(Number(rawId))) {
                     meta = await fetchTMDB(`/${mediaType}/${rawId}`);
                 }
@@ -387,7 +429,9 @@ async function pullNuvioWatchProgress() {
                 backdrop_path: backdropPath,
                 vote_average: meta?.vote_average || 8.0,
                 release_date: meta ? getYear(meta) : '',
+                first_air_date: meta?.first_air_date || '',
                 mediaType: mediaType,
+                media_type: mediaType,
                 progress: Math.min(Math.max(progress, 5), 95),
                 lastWatched: item.last_watched ? new Date(item.last_watched).getTime() : (item.watched_at ? new Date(item.watched_at).getTime() : Date.now())
             };
@@ -531,7 +575,7 @@ function createMediaCard(item, badgeText = null, progressPercent = null) {
             <h4 class="card-title" title="${title}">${title}</h4>
             <div class="card-meta">
                 <span>${year}</span>
-                <span>${badgeText || mediaType.toUpperCase()}</span>
+                <span>${badgeText || (mediaType === 'tv' ? 'SERIES' : 'MOVIE')}</span>
             </div>
         </div>
     `;
