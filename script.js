@@ -9,6 +9,13 @@ const IMG_ORIGINAL = 'https://image.tmdb.org/t/p/original';
 const IMG_POSTER = 'https://image.tmdb.org/t/p/w500';
 const IMG_BACKDROP = 'https://image.tmdb.org/t/p/w1280';
 const PLACEHOLDER_POSTER = 'https://via.placeholder.com/500x750/14151e/8b8d9b?text=No+Poster';
+const PERSON_PLACEHOLDER = `data:image/svg+xml;utf8,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <rect width="100" height="100" fill="#18181b" rx="50"/>
+  <circle cx="50" cy="38" r="18" fill="#52525b"/>
+  <path d="M22 84 C22 66, 35 60, 50 60 C65 60, 78 66, 78 84 Z" fill="#52525b"/>
+</svg>
+`)}`;
 
 // Nuvio & Streaming Addon APIs (https://nuvio.tv/docs)
 const NUVIO_API_URL = 'https://api.nuvio.tv';
@@ -944,10 +951,36 @@ function renderSearchView() {
     heroBanner.style.display = 'none';
     if (!searchInput.value.trim()) {
         sectionsContainer.innerHTML = `
-            <div class="empty-state">
+            <div class="empty-state search-empty-state">
                 <i class="fi fi-tr-search"></i>
-                <h3>Search Aeeo</h3>
-                <p>Type above to discover movies, TV shows, actors, and directors.</p>
+                <h3>Explore Movies, TV Shows, Actors & Genres</h3>
+                <p style="max-width: 580px; margin: 0 auto; color: var(--text-secondary); line-height: 1.55;">
+                    Search for specific movies or TV series, explore any actor or director's complete filmography, or discover top titles by genre.
+                </p>
+                <div class="search-category-hints">
+                    <div class="hint-group">
+                        <span class="hint-label">Actors:</span>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Pedro Pascal')">Pedro Pascal</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Zendaya')">Zendaya</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Cillian Murphy')">Cillian Murphy</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Tom Cruise')">Tom Cruise</button>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-label">Genres:</span>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Action')">Action</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Comedy')">Comedy</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Sci-Fi')">Sci-Fi</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Horror')">Horror</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Animation')">Animation</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Drama')">Drama</button>
+                    </div>
+                    <div class="hint-group">
+                        <span class="hint-label">Series:</span>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('The Last of Us')">The Last of Us</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Breaking Bad')">Breaking Bad</button>
+                        <button type="button" class="search-tag-btn" onclick="window.triggerSearchTag('Severance')">Severance</button>
+                    </div>
+                </div>
             </div>
         `;
     } else {
@@ -955,6 +988,12 @@ function renderSearchView() {
     }
     setTimeout(() => searchInput.focus(), 50);
 }
+
+window.triggerSearchTag = function(tag) {
+    searchInput.value = tag;
+    searchClearBtn.style.display = 'flex';
+    performSearch(tag);
+};
 
 function renderProfileView() {
     heroBanner.style.display = 'none';
@@ -1191,6 +1230,7 @@ function switchView(viewName) {
 
 // --- Cast Filmography Explorer ---
 async function openPersonFilmography(personId, personName) {
+    const prevQuery = searchInput.value.trim();
     closeDetailScreen();
     switchView('search');
     searchInput.value = personName;
@@ -1220,12 +1260,17 @@ async function openPersonFilmography(personId, personName) {
             });
 
         const bio = person?.biography ? person.biography.slice(0, 260) + (person.biography.length > 260 ? '...' : '') : '';
-        const profileImg = person?.profile_path ? `${IMG_POSTER}${person.profile_path}` : PLACEHOLDER_POSTER;
+        const profileImg = person?.profile_path ? `${IMG_POSTER}${person.profile_path}` : PERSON_PLACEHOLDER;
         const dept = person?.known_for_department || 'Acting';
 
         sectionsContainer.innerHTML = `
+            <div style="margin-bottom: 1.25rem;">
+                <button class="btn btn-secondary" id="actor-back-btn" style="border-radius: 30px; padding: 0.55rem 1.25rem; display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 600;">
+                    <i class="fi fi-tr-arrow-left"></i> <span>Back to Search</span>
+                </button>
+            </div>
             <div style="display: flex; align-items: center; gap: 2rem; margin-bottom: 2.5rem; background: rgba(255,255,255,0.03); padding: 1.75rem 2rem; border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.08);">
-                <img src="${profileImg}" alt="${personName}" style="width: 86px; height: 86px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); box-shadow: 0 4px 18px var(--accent-glow); flex-shrink: 0;" onerror="this.src='${PLACEHOLDER_POSTER}'">
+                <img src="${profileImg}" alt="${personName}" style="width: 86px; height: 86px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); box-shadow: 0 4px 18px var(--accent-glow); flex-shrink: 0;" onerror="this.onerror=null; this.src='${PERSON_PLACEHOLDER}'">
                 <div>
                     <h2 style="font-size: 1.75rem; font-weight: 800; color: #ffffff; margin-bottom: 0.3rem;">${personName}</h2>
                     <div style="font-size: 0.88rem; color: var(--accent); font-weight: 600; margin-bottom: 0.45rem;">${dept} • ${validTitles.length} Titles</div>
@@ -1236,6 +1281,21 @@ async function openPersonFilmography(personId, personName) {
                 <h3 class="media-section-title">Filmography</h3>
             </div>
         `;
+
+        const actorBackBtn = document.getElementById('actor-back-btn');
+        if (actorBackBtn) {
+            actorBackBtn.onclick = () => {
+                if (prevQuery && prevQuery.toLowerCase() !== personName.toLowerCase()) {
+                    searchInput.value = prevQuery;
+                    searchClearBtn.style.display = 'flex';
+                    performSearch(prevQuery);
+                } else {
+                    searchInput.value = '';
+                    searchClearBtn.style.display = 'none';
+                    renderSearchView();
+                }
+            };
+        }
 
         if (validTitles.length > 0) {
             const grid = document.createElement('div');
@@ -1428,11 +1488,11 @@ async function performSearch(query) {
             </div>
             <div class="person-row">
                 ${peopleList.slice(0, 12).map(p => {
-                    const avatar = p.profile_path ? `${IMG_POSTER}${p.profile_path}` : PLACEHOLDER_POSTER;
+                    const avatar = p.profile_path ? `${IMG_POSTER}${p.profile_path}` : PERSON_PLACEHOLDER;
                     const dept = p.known_for_department || 'Acting';
                     return `
                         <div class="person-card" data-person-id="${p.id}" data-person-name="${p.name}" title="View ${p.name}'s filmography">
-                            <img class="person-avatar" src="${avatar}" alt="${p.name}" loading="lazy" onerror="this.src='${PLACEHOLDER_POSTER}'">
+                            <img class="person-avatar" src="${avatar}" alt="${p.name}" loading="lazy" onerror="this.onerror=null; this.src='${PERSON_PLACEHOLDER}'">
                             <span class="person-name">${p.name}</span>
                             <span class="person-dept">${dept}</span>
                         </div>
@@ -1691,10 +1751,10 @@ async function openModal(id, type = 'movie', directImdbId = null, autoPlayTraile
     // Cast Row (Clickable)
     if (data.credits && data.credits.cast && data.credits.cast.length > 0) {
         detailCastRow.innerHTML = data.credits.cast.slice(0, 15).map(c => {
-            const avatar = c.profile_path ? `${IMG_POSTER}${c.profile_path}` : PLACEHOLDER_POSTER;
+            const avatar = c.profile_path ? `${IMG_POSTER}${c.profile_path}` : PERSON_PLACEHOLDER;
             return `
                 <div class="cast-card" data-person-id="${c.id}" data-person-name="${c.name}" title="View ${c.name}'s filmography">
-                    <img class="cast-avatar" src="${avatar}" alt="${c.name}" loading="lazy" onerror="this.src='${PLACEHOLDER_POSTER}'">
+                    <img class="cast-avatar" src="${avatar}" alt="${c.name}" loading="lazy" onerror="this.onerror=null; this.src='${PERSON_PLACEHOLDER}'">
                     <span class="cast-name">${c.name}</span>
                     <span class="cast-character">${c.character || ''}</span>
                 </div>
@@ -1833,15 +1893,6 @@ if (episodesScrollRightBtn) {
     episodesScrollRightBtn.onclick = () => {
         if (detailEpisodesList) detailEpisodesList.scrollBy({ left: 320, behavior: 'smooth' });
     };
-}
-
-if (detailEpisodesList) {
-    detailEpisodesList.addEventListener('wheel', (e) => {
-        if (e.deltaY !== 0 && detailEpisodesList.scrollWidth > detailEpisodesList.clientWidth) {
-            e.preventDefault();
-            detailEpisodesList.scrollLeft += e.deltaY;
-        }
-    }, { passive: false });
 }
 
 // --- Nuvio Authentication Logic (https://nuvio.tv/docs) ---
