@@ -200,6 +200,18 @@ function recordWatchProgress(item, progressPercent = 45) {
     const type = getMediaType(item);
     const index = state.continueWatching.findIndex(i => i.id === item.id && i.mediaType === type);
     
+    // If 97% or more has been seen, remove it from Continue Watching
+    if (progressPercent >= 97) {
+        if (index > -1) {
+            state.continueWatching.splice(index, 1);
+            localStorage.setItem('aeeo_continue_watching', JSON.stringify(state.continueWatching));
+            if (state.currentView === 'home') {
+                renderHomeView();
+            }
+        }
+        return;
+    }
+
     const record = {
         id: item.id,
         imdb_id: item.imdb_id || item.external_ids?.imdb_id,
@@ -209,7 +221,7 @@ function recordWatchProgress(item, progressPercent = 45) {
         vote_average: item.vote_average,
         release_date: item.release_date || item.first_air_date,
         mediaType: type,
-        progress: Math.min(Math.max(progressPercent, 5), 95),
+        progress: Math.min(Math.max(progressPercent, 5), 96),
         lastWatched: Date.now()
     };
 
@@ -341,14 +353,16 @@ async function pullNuvioWatchProgress() {
             };
         });
 
-        const cloudItems = await Promise.all(enrichedPromises);
+        const cloudItems = (await Promise.all(enrichedPromises)).filter(i => (i.progress || 0) < 97);
         
         // Merge with local continue watching items
         const mergedMap = new Map();
         cloudItems.forEach(i => mergedMap.set(`${i.id}-${i.mediaType}`, i));
         state.continueWatching.forEach(i => {
-            const key = `${i.id}-${i.mediaType}`;
-            if (!mergedMap.has(key)) mergedMap.set(key, i);
+            if ((i.progress || 0) < 97) {
+                const key = `${i.id}-${i.mediaType}`;
+                if (!mergedMap.has(key)) mergedMap.set(key, i);
+            }
         });
 
         state.continueWatching = Array.from(mergedMap.values()).sort((a, b) => (b.lastWatched || 0) - (a.lastWatched || 0));
