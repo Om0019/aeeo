@@ -14,8 +14,25 @@ const PLACEHOLDER_POSTER = 'https://via.placeholder.com/500x750/14151e/8b8d9b?te
 const NUVIO_API_URL = 'https://api.nuvio.tv';
 const NUVIO_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNTIxMzQ2LCJleHAiOjE5MzkyMDEzNDZ9.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI';
 
-// Default Active Streaming Addons (empty by default, user-configurable)
-const DEFAULT_STREAMING_ADDONS = [];
+// Default Active Streaming Addons (FL4X English & Latino aggregators)
+const DEFAULT_STREAMING_ADDONS = [
+    {
+        id: 'org.stremio.english-addon',
+        name: 'FL4X English',
+        url: 'https://addon.fl4x.com/english/manifest.json',
+        type: 'Aggregated English Streams',
+        version: '1.0.0',
+        enabled: true
+    },
+    {
+        id: 'com.latino.spanish',
+        name: 'FL4X Latino 🇲🇽',
+        url: 'https://addon.fl4x.com/manifest.json',
+        type: 'Películas y Series Latino',
+        version: '1.0.1',
+        enabled: true
+    }
+];
 
 // Initial Demo / Starter In-Progress Titles
 const INITIAL_CONTINUE_WATCHING = [
@@ -70,14 +87,19 @@ try {
     initialCW = INITIAL_CONTINUE_WATCHING;
 }
 
-let loadedStreamingAddons = [];
+let loadedStreamingAddons = DEFAULT_STREAMING_ADDONS;
 try {
     const rawAddons = localStorage.getItem('aeeo_streaming_addons');
     if (rawAddons) {
-        loadedStreamingAddons = JSON.parse(rawAddons).filter(a => a.id !== 'torrentio');
+        const parsed = JSON.parse(rawAddons).filter(a => a.id !== 'torrentio');
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            loadedStreamingAddons = parsed;
+        } else {
+            loadedStreamingAddons = DEFAULT_STREAMING_ADDONS;
+        }
     }
 } catch (e) {
-    loadedStreamingAddons = [];
+    loadedStreamingAddons = DEFAULT_STREAMING_ADDONS;
 }
 
 // Application State
