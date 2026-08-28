@@ -1187,6 +1187,69 @@ function switchView(viewName) {
     }
 }
 
+// --- Cast Filmography Explorer ---
+async function openPersonFilmography(personId, personName) {
+    closeDetailScreen();
+    switchView('search');
+    searchInput.value = personName;
+    searchClearBtn.style.display = 'flex';
+
+    heroBanner.style.display = 'none';
+    sectionsContainer.innerHTML = '<div style="text-align:center; padding: 3rem;"><p>Loading filmography...</p></div>';
+
+    try {
+        const [person, credits] = await Promise.all([
+            fetchTMDB(`/person/${personId}`),
+            fetchTMDB(`/person/${personId}/combined_credits`)
+        ]);
+
+        const knownFor = (credits && credits.cast) ? credits.cast : [];
+        const seen = new Set();
+        const validTitles = [];
+        knownFor
+            .filter(item => (item.poster_path || item.backdrop_path) && (item.media_type === 'movie' || item.media_type === 'tv'))
+            .sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0))
+            .forEach(item => {
+                const key = `${item.media_type || 'movie'}-${item.id}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    validTitles.push(item);
+                }
+            });
+
+        const bio = person?.biography ? person.biography.slice(0, 260) + (person.biography.length > 260 ? '...' : '') : '';
+        const profileImg = person?.profile_path ? `${IMG_POSTER}${person.profile_path}` : PLACEHOLDER_POSTER;
+        const dept = person?.known_for_department || 'Acting';
+
+        sectionsContainer.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 2rem; margin-bottom: 2.5rem; background: rgba(255,255,255,0.03); padding: 1.75rem 2rem; border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.08);">
+                <img src="${profileImg}" alt="${personName}" style="width: 86px; height: 86px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); box-shadow: 0 4px 18px var(--accent-glow); flex-shrink: 0;" onerror="this.src='${PLACEHOLDER_POSTER}'">
+                <div>
+                    <h2 style="font-size: 1.75rem; font-weight: 800; color: #ffffff; margin-bottom: 0.3rem;">${personName}</h2>
+                    <div style="font-size: 0.88rem; color: var(--accent); font-weight: 600; margin-bottom: 0.45rem;">${dept} • ${validTitles.length} Titles</div>
+                    ${bio ? `<p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5; max-width: 800px; margin: 0;">${bio}</p>` : ''}
+                </div>
+            </div>
+            <div class="media-section-header">
+                <h3 class="media-section-title">Filmography</h3>
+            </div>
+        `;
+
+        if (validTitles.length > 0) {
+            const grid = document.createElement('div');
+            grid.className = 'media-grid';
+            validTitles.forEach(item => grid.appendChild(createMediaCard(item)));
+            sectionsContainer.appendChild(grid);
+        } else {
+            sectionsContainer.innerHTML += '<p style="color: var(--text-muted); padding: 1rem 0;">No filmography records found.</p>';
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+        console.error('Error fetching filmography:', err);
+        performSearch(personName);
+    }
+}
+
 // --- Search Functionality ---
 let searchDebounceTimeout = null;
 
@@ -1443,18 +1506,28 @@ async function openModal(id, type = 'movie', directImdbId = null, autoPlayTraile
     detailReleaseDate.textContent = data.release_date || data.first_air_date || year || 'N/A';
     detailOrigLang.textContent = (data.original_language || 'en').toUpperCase();
 
-    // Cast Row
+    // Cast Row (Clickable)
     if (data.credits && data.credits.cast && data.credits.cast.length > 0) {
-        detailCastRow.innerHTML = data.credits.cast.slice(0, 10).map(c => {
+        detailCastRow.innerHTML = data.credits.cast.slice(0, 15).map(c => {
             const avatar = c.profile_path ? `${IMG_POSTER}${c.profile_path}` : PLACEHOLDER_POSTER;
             return `
-                <div class="cast-card">
+                <div class="cast-card" data-person-id="${c.id}" data-person-name="${c.name}" title="View ${c.name}'s filmography">
                     <img class="cast-avatar" src="${avatar}" alt="${c.name}" loading="lazy" onerror="this.src='${PLACEHOLDER_POSTER}'">
                     <span class="cast-name">${c.name}</span>
                     <span class="cast-character">${c.character || ''}</span>
                 </div>
             `;
         }).join('');
+
+        detailCastRow.querySelectorAll('.cast-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const personId = card.getAttribute('data-person-id');
+                const personName = card.getAttribute('data-person-name');
+                if (personId && personName) {
+                    openPersonFilmography(personId, personName);
+                }
+            });
+        });
     } else {
         detailCastRow.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No cast information available.</p>';
     }
@@ -1509,14 +1582,35 @@ async function openModal(id, type = 'movie', directImdbId = null, autoPlayTraile
     detailTrailerIframe.src = '';
     detailPlayerSection.style.display = 'none';
 
-    // Play Button & Watch Trailer Button Handlers
+    // Check if progress exists in continue watching
+    const existingProgress = (state.continueWatching || []).find(item => {
+        const itemType = getMediaType(item);
+        const matchesId = (
+            String(item.id) === String(data.id) ||
+            (imdbId && (item.id === imdbId || item.imdb_id === imdbId)) ||
+            (item.tmdb_id && String(item.tmdb_id) === String(data.id)) ||
+            (data.id && String(item.id).startsWith(`${data.id}:`))
+        );
+        return matchesId && (itemType === type);
+    });
+
+    const hasProgress = existingProgress && (existingProgress.progress > 0) && !isItemCompleted(existingProgress);
+    if (hasProgress) {
+        detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Continue Watching</span>';
+    } else {
+        detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Play</span>';
+    }
+
+    // Play / Continue Watching Button Handler
     detailPlayBtn.onclick = () => {
         if (trailerVideo) {
             playTrailerVideo(trailerVideo);
         } else {
             alert(`Playback ready for: ${title}`);
-            recordWatchProgress(data, 10);
         }
+        const currentProgress = existingProgress ? Math.min(existingProgress.progress + 10, 95) : 15;
+        recordWatchProgress(existingProgress || data, currentProgress);
+        detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Continue Watching</span>';
     };
 
     detailTrailerBtn.onclick = () => {
