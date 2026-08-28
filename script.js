@@ -561,12 +561,28 @@ function updateHeroBanner(item, customBadge = 'Featured') {
 }
 
 /**
+ * Helper to check if an item is completed (>= 97% watched)
+ */
+function isItemCompleted(item) {
+    if (!item) return true;
+    const progress = Number(item.progress);
+    if (!isNaN(progress) && progress >= 97) return true;
+    if (item.duration && item.position) {
+        const pct = (Number(item.position) / Number(item.duration)) * 100;
+        if (!isNaN(pct) && pct >= 97) return true;
+    }
+    return false;
+}
+
+/**
  * Deduplicate items so that each movie / show appears only once across the entire view
  */
-function filterUniqueMedia(items, seenSet) {
+function filterUniqueMedia(items, seenSet, isContinueWatching = false) {
     if (!items || !Array.isArray(items)) return [];
     return items.filter(item => {
         if (!item) return false;
+        if (isContinueWatching && isItemCompleted(item)) return false;
+        
         const id = item.id || item.imdb_id;
         const title = (item.title || item.name || '').toLowerCase().trim();
         const mediaType = getMediaType(item);
@@ -598,6 +614,10 @@ async function renderHomeView() {
             console.warn('Nuvio watch progress sync skipped:', e);
         }
     }
+
+    // Filter out any items >= 97% from Continue Watching
+    state.continueWatching = (state.continueWatching || []).filter(item => !isItemCompleted(item));
+    localStorage.setItem('aeeo_continue_watching', JSON.stringify(state.continueWatching));
 
     const seenSet = new Set();
 
@@ -660,9 +680,9 @@ async function renderHomeView() {
         if (heroItem.title) seenSet.add(`title:${heroItem.title.toLowerCase().trim()}`);
     }
 
-    // 2. Continue Watching (Unique items)
+    // 2. Continue Watching (Unique & uncompleted items < 97%)
     if (state.continueWatching && state.continueWatching.length > 0) {
-        const uniqueCW = filterUniqueMedia(state.continueWatching, seenSet);
+        const uniqueCW = filterUniqueMedia(state.continueWatching, seenSet, true);
         if (uniqueCW.length > 0) {
             const cwSection = createMediaSection('Continue Watching', uniqueCW, null, true);
             if (cwSection) sectionsContainer.appendChild(cwSection);
