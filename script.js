@@ -198,11 +198,40 @@ async function fetchStreamsForMedia(imdbId, type = 'movie') {
         try {
             let baseUrl = (addon.url || '').replace('/manifest.json', '').replace(/\/+$/, '');
             if (!baseUrl) continue;
-            const res = await fetch(`${baseUrl}/stream/${targetType}/${imdbId}.json`);
+
+            // Signal to FL4X server that client is a web browser and to disable AIOStreams
+            const streamUrl = new URL(`${baseUrl}/stream/${targetType}/${imdbId}.json`);
+            streamUrl.searchParams.set('client', 'web');
+            streamUrl.searchParams.set('platform', 'web');
+            streamUrl.searchParams.set('isWeb', 'true');
+            streamUrl.searchParams.set('disableAiostreams', 'true');
+            streamUrl.searchParams.set('source', 'web');
+
+            const res = await fetch(streamUrl.toString(), {
+                headers: {
+                    'X-Client': 'web',
+                    'X-Platform': 'web',
+                    'X-Disable-AIOStreams': 'true',
+                    'X-Is-Web': 'true',
+                    'Accept': 'application/json'
+                }
+            });
+
             if (res.ok) {
                 const data = await res.json();
                 if (data && Array.isArray(data.streams)) {
-                    allStreams.push(...data.streams);
+                    // Exclude any AIOStreams torrent/debrid links on web client
+                    const webReadyStreams = data.streams.filter(stream => {
+                        const name = (stream.name || '').toLowerCase();
+                        const title = (stream.title || '').toLowerCase();
+                        const desc = (stream.description || '').toLowerCase();
+                        const isAiostreams = name.includes('aiostreams') || 
+                                             title.includes('aiostreams') || 
+                                             desc.includes('aiostreams') ||
+                                             (name.includes('torrentio') && !stream.url?.includes('/proxy/'));
+                        return !isAiostreams;
+                    });
+                    allStreams.push(...(webReadyStreams.length > 0 ? webReadyStreams : data.streams));
                 }
             }
         } catch (e) {
