@@ -767,33 +767,40 @@ body {
    Full Detail Screen with Hero, Play Button & Video Player
    ========================================================================== */
 .detail-screen {
-    position: relative;
-    width: 100%;
-    min-height: 100vh;
+    position: fixed;
+    top: 0;
+    left: var(--sidebar-width);
+    right: 0;
+    bottom: 0;
+    width: calc(100% - var(--sidebar-width));
+    height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
     background-color: var(--bg-main);
     color: var(--text-primary);
     padding-bottom: 5rem;
-    z-index: 100;
+    z-index: 500;
 }
 
 .detail-back-btn {
     position: absolute;
-    top: 1.5rem;
-    left: 2rem;
+    top: 2rem;
+    left: 3.5rem;
     z-index: 20;
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    background: rgba(0, 0, 0, 0.65);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    gap: 0.6rem;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.18);
     color: #ffffff;
-    padding: 0.55rem 1.15rem;
-    border-radius: 25px;
+    padding: 0.65rem 1.3rem;
+    border-radius: 30px;
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     cursor: pointer;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     transition: all 0.2s ease;
 }
 
@@ -801,16 +808,16 @@ body {
     background-color: var(--accent);
     color: var(--on-accent);
     border-color: var(--accent);
-    transform: translateX(-3px);
+    transform: translateX(-4px);
 }
 
 .detail-hero-wrap {
     position: relative;
     width: 100%;
-    min-height: 68vh;
+    min-height: 72vh;
     display: flex;
     align-items: flex-end;
-    padding: 5rem 3rem 2.5rem;
+    padding: 7rem 3.5rem 3rem;
     box-sizing: border-box;
 }
 

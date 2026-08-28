@@ -1296,7 +1296,6 @@ function closeDetailScreen() {
     if (detailTrailerIframe) detailTrailerIframe.src = '';
     if (detailPlayerSection) detailPlayerSection.style.display = 'none';
     if (detailScreen) detailScreen.style.display = 'none';
-    if (contentContainer) contentContainer.style.display = 'block';
     state.activeModalItem = null;
     state.activeTrailerVideo = null;
 }
@@ -1430,10 +1429,9 @@ async function openModal(id, type = 'movie', directImdbId = null, autoPlayTraile
 
     updateWatchlistButtons();
 
-    // Show Detail Screen and hide main scroll container
-    contentContainer.style.display = 'none';
+    // Show Detail Screen as fixed overlay aligned with sidebar
     detailScreen.style.display = 'block';
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    detailScreen.scrollTop = 0;
 
     if (autoPlayTrailer && trailerVideo) {
         playTrailerVideo(trailerVideo);
