@@ -536,15 +536,15 @@ function updateWatchlistButtons() {
     if (state.featuredItem) {
         const isAdded = isInWatchlist(state.featuredItem.id, getMediaType(state.featuredItem));
         heroWatchlistBtn.innerHTML = isAdded
-            ? '<i class="fi fi-tr-check"></i> Added'
-            : '<i class="fi fi-tr-plus"></i> Watchlist';
+            ? '<i class="fi fi-tr-check"></i> <span>Added</span>'
+            : '<i class="fi fi-tr-plus"></i> <span>Watchlist</span>';
     }
 
     if (state.activeModalItem && detailWatchlistBtn) {
         const isAdded = isInWatchlist(state.activeModalItem.id, getMediaType(state.activeModalItem));
         detailWatchlistBtn.innerHTML = isAdded
-            ? '<i class="fi fi-tr-check"></i> In Watchlist'
-            : '<i class="fi fi-tr-plus"></i> Watchlist';
+            ? '<i class="fi fi-tr-check"></i> <span>In Watchlist</span>'
+            : '<i class="fi fi-tr-plus"></i> <span>Watchlist</span>';
     }
 }
 
