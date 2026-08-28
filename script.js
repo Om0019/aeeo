@@ -13,19 +13,9 @@ const PLACEHOLDER_POSTER = 'https://via.placeholder.com/500x750/14151e/8b8d9b?te
 // Nuvio & Streaming Addon APIs (https://nuvio.tv/docs)
 const NUVIO_API_URL = 'https://api.nuvio.tv';
 const NUVIO_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNTIxMzQ2LCJleHAiOjE5MzkyMDEzNDZ9.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI';
-const TORRENTIO_BASE_URL = 'https://torrentio.strem.fun';
 
-// Default Active Streaming Addons
-const DEFAULT_STREAMING_ADDONS = [
-    { 
-        id: 'torrentio', 
-        name: 'Torrentio Streams', 
-        url: 'https://torrentio.strem.fun/manifest.json',
-        type: 'Torrent & Debrid Scraper', 
-        version: '1.0.8', 
-        enabled: true 
-    }
-];
+// Default Active Streaming Addons (empty by default, user-configurable)
+const DEFAULT_STREAMING_ADDONS = [];
 
 // Initial Demo / Starter In-Progress Titles
 const INITIAL_CONTINUE_WATCHING = [
@@ -80,6 +70,16 @@ try {
     initialCW = INITIAL_CONTINUE_WATCHING;
 }
 
+let loadedStreamingAddons = [];
+try {
+    const rawAddons = localStorage.getItem('aeeo_streaming_addons');
+    if (rawAddons) {
+        loadedStreamingAddons = JSON.parse(rawAddons).filter(a => a.id !== 'torrentio');
+    }
+} catch (e) {
+    loadedStreamingAddons = [];
+}
+
 // Application State
 const state = {
     currentView: 'home',
@@ -88,7 +88,7 @@ const state = {
     continueWatching: initialCW,
     activeModalItem: null,
     nuvioSession: JSON.parse(localStorage.getItem('aeeo_nuvio_session') || 'null'),
-    streamingAddons: JSON.parse(localStorage.getItem('aeeo_streaming_addons') || JSON.stringify(DEFAULT_STREAMING_ADDONS)),
+    streamingAddons: loadedStreamingAddons,
     authMode: 'login' // 'login' | 'signup'
 };
 
@@ -163,18 +163,32 @@ async function fetchTMDB(endpoint, params = {}) {
     }
 }
 
-// Fetch Streams for a given Movie or Series from Addons
+// Fetch Streams for a given Movie or Series from Configured Addons
 async function fetchStreamsForMedia(imdbId, type = 'movie') {
     if (!imdbId) return [];
-    try {
-        const targetType = type === 'tv' ? 'series' : 'movie';
-        const res = await fetch(`${TORRENTIO_BASE_URL}/stream/${targetType}/${imdbId}.json`);
-        if (!res.ok) return [];
-        const data = await res.json();
-        return data.streams || [];
-    } catch (e) {
-        return [];
+    if (!state.streamingAddons || state.streamingAddons.length === 0) return [];
+
+    const targetType = type === 'tv' ? 'series' : 'movie';
+    const allStreams = [];
+
+    for (const addon of state.streamingAddons) {
+        if (addon.enabled === false) continue;
+        try {
+            let baseUrl = (addon.url || '').replace('/manifest.json', '').replace(/\/+$/, '');
+            if (!baseUrl) continue;
+            const res = await fetch(`${baseUrl}/stream/${targetType}/${imdbId}.json`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && Array.isArray(data.streams)) {
+                    allStreams.push(...data.streams);
+                }
+            }
+        } catch (e) {
+            console.warn('Stream resolution error for addon:', addon.name, e);
+        }
     }
+
+    return allStreams;
 }
 
 function getTitle(item) {
@@ -952,7 +966,13 @@ function renderSettingsView() {
                 </p>
 
                 <div class="addons-list" id="addons-list">
-                    ${state.streamingAddons.map(addon => `
+                    ${state.streamingAddons.length === 0 ? `
+                        <div style="padding: 1.5rem; text-align: center; color: var(--text-muted); background: rgba(255,255,255,0.02); border-radius: var(--radius-sm); border: 1px dashed var(--border-color);">
+                            <i class="fi fi-tr-play" style="font-size: 1.5rem; display: block; margin-bottom: 0.5rem; color: var(--text-muted);"></i>
+                            <p style="font-size: 0.95rem; margin-bottom: 0.25rem;">No streaming addons installed.</p>
+                            <span style="font-size: 0.78rem;">Paste a manifest URL below to add your streaming scraper.</span>
+                        </div>
+                    ` : state.streamingAddons.map((addon, idx) => `
                         <div class="addon-item">
                             <div class="addon-left">
                                 <div class="addon-icon"><i class="fi fi-tr-play"></i></div>
@@ -961,7 +981,12 @@ function renderSettingsView() {
                                     <span style="font-size: 0.72rem; word-break: break-all;">${addon.url || 'Active Streaming Provider'}</span>
                                 </div>
                             </div>
-                            <span class="addon-badge streaming">Active Streamer</span>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span class="addon-badge streaming">Active</span>
+                                <button class="btn-icon btn-remove-addon" data-index="${idx}" title="Remove Addon" style="width: 28px; height: 28px; font-size: 0.8rem; background: rgba(255,255,255,0.06); cursor: pointer;">
+                                    <i class="fi fi-tr-trash"></i>
+                                </button>
+                            </div>
                         </div>
                     `).join('')}
                 </div>
@@ -1015,6 +1040,18 @@ function renderSettingsView() {
         } catch (e) {
             alert('Failed to install streaming addon. Please check the manifest URL.');
         }
+    });
+
+    // Remove Addon Listeners
+    document.querySelectorAll('.btn-remove-addon').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = Number(btn.getAttribute('data-index'));
+            if (!isNaN(index) && index >= 0 && index < state.streamingAddons.length) {
+                const removed = state.streamingAddons.splice(index, 1);
+                localStorage.setItem('aeeo_streaming_addons', JSON.stringify(state.streamingAddons));
+                renderSettingsView();
+            }
+        });
     });
 }
 
