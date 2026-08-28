@@ -185,6 +185,8 @@ const detailCastRow = document.getElementById('detail-cast-row');
 const detailEpisodesSection = document.getElementById('detail-episodes-section');
 const detailSeasonSelect = document.getElementById('detail-season-select');
 const detailEpisodesList = document.getElementById('detail-episodes-list');
+const episodesScrollLeftBtn = document.getElementById('episodes-scroll-left');
+const episodesScrollRightBtn = document.getElementById('episodes-scroll-right');
 const detailOrigTitle = document.getElementById('detail-orig-title');
 const detailStatus = document.getElementById('detail-status');
 const detailReleaseDate = document.getElementById('detail-release-date');
@@ -1250,47 +1252,226 @@ async function openPersonFilmography(personId, personName) {
     }
 }
 
-// --- Search Functionality ---
+// --- Comprehensive Multi-Faceted Search (Actor, Title, Genre) ---
+const TMDB_GENRE_MAP = {
+    'action': { movie: 28, tv: 10759, name: 'Action' },
+    'adventure': { movie: 12, tv: 10759, name: 'Adventure' },
+    'animation': { movie: 16, tv: 16, name: 'Animation' },
+    'anime': { movie: 16, tv: 16, name: 'Anime' },
+    'comedy': { movie: 35, tv: 35, name: 'Comedy' },
+    'comedies': { movie: 35, tv: 35, name: 'Comedy' },
+    'crime': { movie: 80, tv: 80, name: 'Crime' },
+    'documentary': { movie: 99, tv: 99, name: 'Documentary' },
+    'documentaries': { movie: 99, tv: 99, name: 'Documentary' },
+    'drama': { movie: 18, tv: 18, name: 'Drama' },
+    'dramas': { movie: 18, tv: 18, name: 'Drama' },
+    'family': { movie: 10751, tv: 10751, name: 'Family' },
+    'fantasy': { movie: 14, tv: 10765, name: 'Fantasy' },
+    'history': { movie: 36, tv: null, name: 'History' },
+    'historical': { movie: 36, tv: null, name: 'History' },
+    'horror': { movie: 27, tv: null, name: 'Horror' },
+    'music': { movie: 10402, tv: null, name: 'Music' },
+    'musical': { movie: 10402, tv: null, name: 'Musical' },
+    'mystery': { movie: 9648, tv: 9648, name: 'Mystery' },
+    'romance': { movie: 10749, tv: null, name: 'Romance' },
+    'romantic': { movie: 10749, tv: null, name: 'Romance' },
+    'rom-com': { movie: 10749, tv: null, name: 'Romantic Comedy' },
+    'sci-fi': { movie: 878, tv: 10765, name: 'Sci-Fi' },
+    'scifi': { movie: 878, tv: 10765, name: 'Sci-Fi' },
+    'science fiction': { movie: 878, tv: 10765, name: 'Science Fiction' },
+    'thriller': { movie: 53, tv: null, name: 'Thriller' },
+    'thrillers': { movie: 53, tv: null, name: 'Thriller' },
+    'war': { movie: 10752, tv: 10768, name: 'War' },
+    'western': { movie: 37, tv: 37, name: 'Western' }
+};
+
 let searchDebounceTimeout = null;
 
 async function performSearch(query) {
-    if (!query.trim()) {
+    const rawQuery = query.trim();
+    if (!rawQuery) {
         if (state.currentView === 'search') renderSearchView();
         return;
     }
 
     heroBanner.style.display = 'none';
-    sectionsContainer.innerHTML = '<div style="text-align:center; padding: 2rem;"><p>Searching...</p></div>';
+    sectionsContainer.innerHTML = '<div style="text-align:center; padding: 2.5rem;"><p>Searching movies, shows, actors, and genres...</p></div>';
 
-    const data = await fetchTMDB('/search/multi', { query: encodeURIComponent(query) });
+    const lower = rawQuery.toLowerCase();
 
-    if (!data || !data.results || data.results.length === 0) {
+    // 1. Detect Genre Match
+    let matchedGenre = null;
+    for (const [key, val] of Object.entries(TMDB_GENRE_MAP)) {
+        if (lower === key || lower === `${key}s` || lower === `${key} movies` || lower === `${key} shows` || lower === `${key} series`) {
+            matchedGenre = val;
+            break;
+        }
+    }
+
+    // 2. Parallel Queries: Multi-Search, Person Search, and Genre Discover (if genre matched)
+    const promises = [
+        fetchTMDB('/search/multi', { query: encodeURIComponent(rawQuery) }),
+        fetchTMDB('/search/person', { query: encodeURIComponent(rawQuery) })
+    ];
+
+    if (matchedGenre) {
+        promises.push(fetchTMDB('/discover/movie', { with_genres: matchedGenre.movie, sort_by: 'popularity.desc' }));
+        if (matchedGenre.tv) {
+            promises.push(fetchTMDB('/discover/tv', { with_genres: matchedGenre.tv, sort_by: 'popularity.desc' }));
+        }
+    }
+
+    const [multiRes, personRes, genreMovies, genreTV] = await Promise.all(promises);
+
+    // 3. Process People / Actors
+    const peopleMap = new Map();
+    if (personRes && personRes.results) {
+        personRes.results.forEach(p => {
+            if (p.profile_path || (p.known_for && p.known_for.length > 0)) {
+                peopleMap.set(p.id, p);
+            }
+        });
+    }
+    if (multiRes && multiRes.results) {
+        multiRes.results.forEach(item => {
+            if (item.media_type === 'person') {
+                peopleMap.set(item.id, item);
+            }
+        });
+    }
+    const peopleList = Array.from(peopleMap.values()).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+
+    // 4. Process Titles (Movies & TV Series)
+    const titlesMap = new Map();
+
+    // Add direct title search results
+    if (multiRes && multiRes.results) {
+        multiRes.results.forEach(item => {
+            if ((item.media_type === 'movie' || item.media_type === 'tv') && (item.poster_path || item.backdrop_path)) {
+                const key = `${item.media_type}-${item.id}`;
+                titlesMap.set(key, item);
+            }
+        });
+    }
+
+    // Add Genre Discover results if matched
+    if (genreMovies && genreMovies.results) {
+        genreMovies.results.forEach(item => {
+            if (item.poster_path || item.backdrop_path) {
+                item.media_type = 'movie';
+                titlesMap.set(`movie-${item.id}`, item);
+            }
+        });
+    }
+    if (genreTV && genreTV.results) {
+        genreTV.results.forEach(item => {
+            if (item.poster_path || item.backdrop_path) {
+                item.media_type = 'tv';
+                titlesMap.set(`tv-${item.id}`, item);
+            }
+        });
+    }
+
+    // Add Actor's Known-For titles if people matched
+    peopleList.forEach(p => {
+        if (Array.isArray(p.known_for)) {
+            p.known_for.forEach(item => {
+                if ((item.media_type === 'movie' || item.media_type === 'tv') && (item.poster_path || item.backdrop_path)) {
+                    const key = `${item.media_type}-${item.id}`;
+                    if (!titlesMap.has(key)) titlesMap.set(key, item);
+                }
+            });
+        }
+    });
+
+    // If top person is a prominent actor and titles count is low, pull their filmography
+    if (peopleList.length > 0 && titlesMap.size < 4) {
+        const topPerson = peopleList[0];
+        try {
+            const filmography = await fetchTMDB(`/person/${topPerson.id}/combined_credits`);
+            if (filmography && filmography.cast) {
+                filmography.cast
+                    .filter(c => (c.poster_path || c.backdrop_path) && (c.media_type === 'movie' || c.media_type === 'tv'))
+                    .sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0))
+                    .slice(0, 16)
+                    .forEach(item => {
+                        const key = `${item.media_type || 'movie'}-${item.id}`;
+                        if (!titlesMap.has(key)) titlesMap.set(key, item);
+                    });
+            }
+        } catch (e) {}
+    }
+
+    const titlesList = Array.from(titlesMap.values());
+
+    // 5. Check empty state
+    if (peopleList.length === 0 && titlesList.length === 0) {
         sectionsContainer.innerHTML = `
             <div class="empty-state">
                 <i class="fi fi-tr-search"></i>
-                <h3>No results found for "${query}"</h3>
-                <p>Try checking your spelling or searching for another title.</p>
+                <h3>No results found for "${rawQuery}"</h3>
+                <p>Try searching by actor name (e.g. Pedro Pascal), movie or series title, or genre (e.g. Action, Comedy, Sci-Fi).</p>
             </div>
         `;
         return;
     }
 
-    sectionsContainer.innerHTML = `
-        <div class="media-section-header">
-            <h2 class="media-section-title">Search Results for "${query}"</h2>
-        </div>
-    `;
+    // 6. Render Results
+    sectionsContainer.innerHTML = '';
 
-    const grid = document.createElement('div');
-    grid.className = 'media-grid';
+    // Render Actors & People Row (if any actors matched)
+    if (peopleList.length > 0) {
+        const personSection = document.createElement('div');
+        personSection.innerHTML = `
+            <div class="media-section-header">
+                <h2 class="media-section-title">Actors & People</h2>
+            </div>
+            <div class="person-row">
+                ${peopleList.slice(0, 12).map(p => {
+                    const avatar = p.profile_path ? `${IMG_POSTER}${p.profile_path}` : PLACEHOLDER_POSTER;
+                    const dept = p.known_for_department || 'Acting';
+                    return `
+                        <div class="person-card" data-person-id="${p.id}" data-person-name="${p.name}" title="View ${p.name}'s filmography">
+                            <img class="person-avatar" src="${avatar}" alt="${p.name}" loading="lazy" onerror="this.src='${PLACEHOLDER_POSTER}'">
+                            <span class="person-name">${p.name}</span>
+                            <span class="person-dept">${dept}</span>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
 
-    data.results.forEach(item => {
-        if ((item.media_type === 'movie' || item.media_type === 'tv') && (item.poster_path || item.backdrop_path)) {
+        personSection.querySelectorAll('.person-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const personId = card.getAttribute('data-person-id');
+                const personName = card.getAttribute('data-person-name');
+                if (personId && personName) openPersonFilmography(personId, personName);
+            });
+        });
+
+        sectionsContainer.appendChild(personSection);
+    }
+
+    // Render Titles Section
+    if (titlesList.length > 0) {
+        const titlesHeader = document.createElement('div');
+        titlesHeader.className = 'media-section-header';
+        const headerTitle = matchedGenre 
+            ? `Genre: ${matchedGenre.name} (${titlesList.length} titles)`
+            : (peopleList.length > 0 && titlesList.length > 0 
+                ? `Movies & TV Shows (${titlesList.length})` 
+                : `Search Results for "${rawQuery}" (${titlesList.length})`);
+
+        titlesHeader.innerHTML = `<h2 class="media-section-title">${headerTitle}</h2>`;
+        sectionsContainer.appendChild(titlesHeader);
+
+        const grid = document.createElement('div');
+        grid.className = 'media-grid';
+        titlesList.forEach(item => {
             grid.appendChild(createMediaCard(item));
-        }
-    });
-
-    sectionsContainer.appendChild(grid);
+        });
+        sectionsContainer.appendChild(grid);
+    }
 }
 
 searchInput.addEventListener('input', (e) => {
@@ -1442,6 +1623,7 @@ async function loadSeasonEpisodes(tvId, seasonNumber, showData) {
                 }
             });
         });
+        detailEpisodesList.scrollLeft = 0;
     } catch (err) {
         console.error('Error fetching season episodes:', err);
         detailEpisodesList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem; padding: 1.5rem 0;">Unable to load episodes at this time.</p>';
@@ -1639,6 +1821,27 @@ if (detailPlayerCloseBtn) {
         detailTrailerIframe.src = '';
         detailPlayerSection.style.display = 'none';
     };
+}
+
+// Episodes Horizontal Scroll Controls & Wheel Handler
+if (episodesScrollLeftBtn) {
+    episodesScrollLeftBtn.onclick = () => {
+        if (detailEpisodesList) detailEpisodesList.scrollBy({ left: -320, behavior: 'smooth' });
+    };
+}
+if (episodesScrollRightBtn) {
+    episodesScrollRightBtn.onclick = () => {
+        if (detailEpisodesList) detailEpisodesList.scrollBy({ left: 320, behavior: 'smooth' });
+    };
+}
+
+if (detailEpisodesList) {
+    detailEpisodesList.addEventListener('wheel', (e) => {
+        if (e.deltaY !== 0 && detailEpisodesList.scrollWidth > detailEpisodesList.clientWidth) {
+            e.preventDefault();
+            detailEpisodesList.scrollLeft += e.deltaY;
+        }
+    }, { passive: false });
 }
 
 // --- Nuvio Authentication Logic (https://nuvio.tv/docs) ---
