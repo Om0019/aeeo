@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aeeo - Stream Movies & TV Shows</title>
+    <link rel="stylesheet" href="assets/uicons-thin-rounded/css/uicons-thin-rounded.css">
+    <link href="https://api.fontshare.com/v2/css?f[]=chillax@200,300,400,500,600,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Left Vertical Navigation -->
+    <aside class="sidebar-nav">
+        <div class="nav-brand">
+            <a href="#" class="brand-logo" title="Aeeo" data-view="home">
+                <span>A</span>
+            </a>
+        </div>
+
+        <nav class="nav-menu">
+            <ul class="nav-list">
+                <li class="nav-item active" data-view="home">
+                    <a href="#" class="nav-link" title="Home" aria-label="Home">
+                        <i class="fi fi-tr-house-blank"></i>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="search">
+                    <a href="#" class="nav-link" title="Search" aria-label="Search">
+                        <i class="fi fi-tr-search"></i>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="movies">
+                    <a href="#" class="nav-link" title="Movies" aria-label="Movies">
+                        <i class="fi fi-tr-film"></i>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="tv">
+                    <a href="#" class="nav-link" title="TV Shows" aria-label="TV Shows">
+                        <i class="fi fi-tr-screen"></i>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="watchlist">
+                    <a href="#" class="nav-link" title="Watchlist" aria-label="Watchlist">
+                        <i class="fi fi-tr-bookmark"></i>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="nav-bottom">
+            <ul class="nav-list">
+                <li class="nav-item" data-view="settings">
+                    <a href="#" class="nav-link" title="Settings" aria-label="Settings">
+                        <i class="fi fi-tr-settings"></i>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="profile">
+                    <a href="#" class="nav-link profile-link" title="Profile" aria-label="Profile">
+                        <i class="fi fi-tr-user"></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </aside>
+
+    <!-- Main Content Container -->
+    <main class="main-content">
+        <!-- Search Bar Area (Active during Search View or accessible from top) -->
+        <header class="top-header" id="top-header">
+            <div class="search-bar-container" id="search-bar-container">
+                <i class="fi fi-tr-search search-icon"></i>
+                <input type="text" id="search-input" placeholder="Search movies, TV shows, actors..." autocomplete="off">
+                <button id="search-clear" class="btn-clear" style="display: none;"><i class="fi fi-tr-cross"></i></button>
+            </div>
+        </header>
+
+        <!-- Dynamic Main Views -->
+        <div id="content-container">
+            <!-- Hero Featured Banner -->
+            <section class="hero-banner" id="hero-banner">
+                <div class="hero-backdrop" id="hero-backdrop"></div>
+                <div class="hero-overlay"></div>
+                <div class="hero-content" id="hero-content">
+                    <span class="hero-badge" id="hero-badge">Featured</span>
+                    <h1 class="hero-title" id="hero-title">Loading...</h1>
+                    <div class="hero-meta" id="hero-meta">
+                        <span class="rating" id="hero-rating"><i class="fi fi-tr-star"></i> --</span>
+                        <span class="year" id="hero-year">----</span>
+                        <span class="type-pill" id="hero-type">MOVIE</span>
+                    </div>
+                    <p class="hero-overview" id="hero-overview"></p>
+                    <div class="hero-actions">
+                        <button class="btn btn-primary" id="hero-play-btn">
+                            <i class="fi fi-tr-play"></i> Watch Trailer
+                        </button>
+                        <button class="btn btn-secondary" id="hero-watchlist-btn">
+                            <i class="fi fi-tr-plus"></i> Watchlist
+                        </button>
+                        <button class="btn btn-icon" id="hero-info-btn" title="More Info">
+                            <i class="fi fi-tr-info"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Media Rows Sections (Trending, Popular Movies, TV Series, etc.) -->
+            <div id="sections-container" class="sections-container">
+                <!-- Sections dynamically loaded by script.js -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal for Movie / Show Details & Trailer Player -->
+    <div class="modal-overlay" id="detail-modal">
+        <div class="modal-card">
+            <button class="modal-close" id="modal-close-btn" aria-label="Close modal">
+                <i class="fi fi-tr-cross"></i>
+            </button>
+            <div class="modal-media-container" id="modal-media-container">
+                <div class="modal-backdrop-wrap" id="modal-backdrop-wrap">
+                    <img id="modal-backdrop" src="" alt="Backdrop">
+                    <button class="modal-play-trailer-btn" id="modal-play-trailer-btn">
+                        <i class="fi fi-tr-play"></i> Play Trailer
+                    </button>
+                </div>
+                <div class="modal-video-wrap" id="modal-video-wrap" style="display: none;">
+                    <iframe id="modal-trailer-iframe" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+                </div>
+            </div>
+            <div class="modal-details">
+                <h2 class="modal-title" id="modal-title"></h2>
+                <div class="modal-meta" id="modal-meta">
+                    <span class="modal-rating" id="modal-rating"><i class="fi fi-tr-star"></i> --</span>
+                    <span class="modal-year" id="modal-year"></span>
+                    <span class="modal-runtime" id="modal-runtime"></span>
+                    <div class="modal-genres" id="modal-genres"></div>
+                </div>
+                <p class="modal-overview" id="modal-overview"></p>
+                <div class="modal-cast" id="modal-cast"></div>
+                
+                <!-- Synced Streaming Addon Streams -->
+                <div class="modal-streams-container" id="modal-streams-container">
+                    <h3 class="modal-streams-title"><i class="fi fi-tr-play"></i> Available Streams</h3>
+                    <div class="streams-list" id="modal-streams-list">
+                        <!-- Stream sources injected dynamically -->
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" id="modal-watchlist-btn">
+                        <i class="fi fi-tr-plus"></i> Add to Watchlist
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Nuvio Login / Sign Up -->
+    <div class="modal-overlay" id="auth-modal">
+        <div class="modal-card auth-card">
+            <button class="modal-close" id="auth-modal-close-btn" aria-label="Close modal">
+                <i class="fi fi-tr-cross"></i>
+            </button>
+            <div class="auth-header">
+                <div class="auth-logo">N</div>
+                <h2 id="auth-title">Log in with Nuvio</h2>
+                <p id="auth-subtitle">Sync your library, addons, and watch progress across devices.</p>
+            </div>
+            
+            <form id="auth-form" class="auth-form">
+                <div class="auth-error-msg" id="auth-error" style="display: none;"></div>
+                <div class="auth-success-msg" id="auth-success" style="display: none;"></div>
+
+                <div class="form-group">
+                    <label for="auth-email">Email Address</label>
+                    <div class="input-wrap">
+                        <i class="fi fi-tr-envelope"></i>
+                        <input type="email" id="auth-email" required placeholder="name@example.com" autocomplete="email">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="auth-password">Password</label>
+                    <div class="input-wrap">
+                        <i class="fi fi-tr-lock"></i>
+                        <input type="password" id="auth-password" required placeholder="••••••••" autocomplete="current-password">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block" id="auth-submit-btn">
+                    <span id="auth-submit-text">Log In</span>
+                </button>
+            </form>
+
+            <div class="auth-footer">
+                <span id="auth-toggle-prompt">Don't have a Nuvio account?</span>
+                <button type="button" class="btn-text" id="auth-toggle-btn">Create one</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
