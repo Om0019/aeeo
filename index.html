@@ -113,46 +113,121 @@
         </div>
     </main>
 
-    <!-- Modal for Movie / Show Details & Trailer Player -->
-    <div class="modal-overlay" id="detail-modal">
-        <div class="modal-card">
-            <button class="modal-close" id="modal-close-btn" aria-label="Close modal">
-                <i class="fi fi-tr-cross"></i>
-            </button>
-            <div class="modal-media-container" id="modal-media-container">
-                <div class="modal-backdrop-wrap" id="modal-backdrop-wrap">
-                    <img id="modal-backdrop" src="" alt="Backdrop">
-                    <button class="modal-play-trailer-btn" id="modal-play-trailer-btn">
-                        <i class="fi fi-tr-play"></i> Play Trailer
-                    </button>
+    <!-- Full Detail Screen with Cinematic Hero, Play Controls & Trailer Player -->
+    <div class="detail-screen" id="detail-screen" style="display: none;">
+        <button class="detail-back-btn" id="detail-back-btn" aria-label="Go Back">
+            <i class="fi fi-tr-arrow-left"></i> <span>Back</span>
+        </button>
+
+        <div class="detail-hero-wrap">
+            <div class="detail-backdrop-bg" id="detail-backdrop-bg"></div>
+            <div class="detail-hero-gradient"></div>
+            
+            <div class="detail-hero-container">
+                <div class="detail-poster-wrap">
+                    <img id="detail-poster-img" src="" alt="Poster" class="detail-poster-img">
                 </div>
-                <div class="modal-video-wrap" id="modal-video-wrap" style="display: none;">
-                    <iframe id="modal-trailer-iframe" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+
+                <div class="detail-hero-info">
+                    <div class="detail-badges" id="detail-badges">
+                        <span class="badge-type" id="detail-type-badge">MOVIE</span>
+                        <span class="badge-quality">4K UHD</span>
+                        <span class="badge-hdr">HDR</span>
+                    </div>
+
+                    <h1 class="detail-title" id="detail-title"></h1>
+                    <p class="detail-tagline" id="detail-tagline"></p>
+
+                    <div class="detail-meta">
+                        <span class="detail-rating" id="detail-rating"><i class="fi fi-tr-star"></i> --</span>
+                        <span class="detail-year" id="detail-year"></span>
+                        <span class="detail-runtime" id="detail-runtime"></span>
+                        <div class="detail-genres" id="detail-genres"></div>
+                    </div>
+
+                    <!-- Prominent Action Buttons with Play Button -->
+                    <div class="detail-actions">
+                        <button class="btn btn-primary btn-play-large" id="detail-play-btn">
+                            <i class="fi fi-tr-play"></i> Play
+                        </button>
+                        <button class="btn btn-secondary btn-trailer" id="detail-trailer-btn">
+                            <i class="fi fi-tr-clapperboard-play"></i> Watch Trailer
+                        </button>
+                        <button class="btn btn-secondary" id="detail-watchlist-btn">
+                            <i class="fi fi-tr-plus"></i> Watchlist
+                        </button>
+                    </div>
+
+                    <p class="detail-overview" id="detail-overview"></p>
                 </div>
             </div>
-            <div class="modal-details">
-                <h2 class="modal-title" id="modal-title"></h2>
-                <div class="modal-meta" id="modal-meta">
-                    <span class="modal-rating" id="modal-rating"><i class="fi fi-tr-star"></i> --</span>
-                    <span class="modal-year" id="modal-year"></span>
-                    <span class="modal-runtime" id="modal-runtime"></span>
-                    <div class="modal-genres" id="modal-genres"></div>
+        </div>
+
+        <!-- Video Player Section (opens smoothly when Play / Watch Trailer is clicked) -->
+        <div class="detail-player-section" id="detail-player-section" style="display: none;">
+            <div class="detail-player-header">
+                <h3 class="detail-player-title" id="detail-player-title">
+                    <i class="fi fi-tr-play"></i> Trailer
+                </h3>
+                <div class="detail-player-controls">
+                    <a id="detail-player-external-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display: none;">
+                        <i class="fi fi-tr-arrow-up-right-from-square"></i> Open in YouTube
+                    </a>
+                    <button class="btn btn-icon btn-sm" id="detail-player-close-btn" title="Close Player">
+                        <i class="fi fi-tr-cross"></i>
+                    </button>
                 </div>
-                <p class="modal-overview" id="modal-overview"></p>
-                <div class="modal-cast" id="modal-cast"></div>
-                
-                <!-- Synced Streaming Addon Streams -->
-                <div class="modal-streams-container" id="modal-streams-container">
-                    <h3 class="modal-streams-title"><i class="fi fi-tr-play"></i> Available Streams</h3>
-                    <div class="streams-list" id="modal-streams-list">
-                        <!-- Stream sources injected dynamically -->
+            </div>
+            <div class="detail-player-frame-wrap">
+                <iframe id="detail-trailer-iframe" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen" 
+                        allowfullscreen="true"></iframe>
+            </div>
+        </div>
+
+        <!-- Details & Cast Content Body -->
+        <div class="detail-body-content">
+            <div class="detail-info-grid">
+                <div class="detail-main-col">
+                    <div class="detail-section-block" id="detail-cast-section">
+                        <h3 class="detail-subheading">Top Cast</h3>
+                        <div class="detail-cast-row" id="detail-cast-row"></div>
+                    </div>
+
+                    <div class="detail-section-block" id="detail-seasons-section" style="display: none;">
+                        <h3 class="detail-subheading">Seasons</h3>
+                        <div class="detail-seasons-grid" id="detail-seasons-grid"></div>
                     </div>
                 </div>
 
-                <div class="modal-actions">
-                    <button class="btn btn-secondary" id="modal-watchlist-btn">
-                        <i class="fi fi-tr-plus"></i> Add to Watchlist
-                    </button>
+                <div class="detail-side-col">
+                    <div class="detail-meta-card">
+                        <h4 class="meta-card-title">Details</h4>
+                        <div class="meta-info-item">
+                            <span class="meta-label">Original Title</span>
+                            <span class="meta-value" id="detail-orig-title">--</span>
+                        </div>
+                        <div class="meta-info-item">
+                            <span class="meta-label">Status</span>
+                            <span class="meta-value" id="detail-status">--</span>
+                        </div>
+                        <div class="meta-info-item">
+                            <span class="meta-label">Release Date</span>
+                            <span class="meta-value" id="detail-release-date">--</span>
+                        </div>
+                        <div class="meta-info-item">
+                            <span class="meta-label">Original Language</span>
+                            <span class="meta-value" id="detail-orig-lang">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- More Like This / Recommendations Row -->
+            <div class="detail-recommendations-section" id="detail-recommendations-section">
+                <h3 class="detail-subheading">More Like This</h3>
+                <div class="media-row-wrap">
+                    <div class="media-row" id="detail-recommendations-row"></div>
                 </div>
             </div>
         </div>

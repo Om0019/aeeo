@@ -161,24 +161,34 @@ const searchInput = document.getElementById('search-input');
 const searchClearBtn = document.getElementById('search-clear');
 const navItems = document.querySelectorAll('.sidebar-nav [data-view]');
 
-// Detail Modal Elements
-const detailModal = document.getElementById('detail-modal');
-const modalCloseBtn = document.getElementById('modal-close-btn');
-const modalBackdrop = document.getElementById('modal-backdrop');
-const modalBackdropWrap = document.getElementById('modal-backdrop-wrap');
-const modalVideoWrap = document.getElementById('modal-video-wrap');
-const modalTrailerIframe = document.getElementById('modal-trailer-iframe');
-const modalPlayTrailerBtn = document.getElementById('modal-play-trailer-btn');
-const modalTitle = document.getElementById('modal-title');
-const modalRating = document.getElementById('modal-rating');
-const modalYear = document.getElementById('modal-year');
-const modalRuntime = document.getElementById('modal-runtime');
-const modalGenres = document.getElementById('modal-genres');
-const modalOverview = document.getElementById('modal-overview');
-const modalCast = document.getElementById('modal-cast');
-const modalWatchlistBtn = document.getElementById('modal-watchlist-btn');
-const modalStreamsContainer = document.getElementById('modal-streams-container');
-const modalStreamsList = document.getElementById('modal-streams-list');
+// Full Detail Screen Elements
+const detailScreen = document.getElementById('detail-screen');
+const detailBackBtn = document.getElementById('detail-back-btn');
+const detailBackdropBg = document.getElementById('detail-backdrop-bg');
+const detailPosterImg = document.getElementById('detail-poster-img');
+const detailTypeBadge = document.getElementById('detail-type-badge');
+const detailTitle = document.getElementById('detail-title');
+const detailTagline = document.getElementById('detail-tagline');
+const detailRating = document.getElementById('detail-rating');
+const detailYear = document.getElementById('detail-year');
+const detailRuntime = document.getElementById('detail-runtime');
+const detailGenres = document.getElementById('detail-genres');
+const detailOverview = document.getElementById('detail-overview');
+const detailPlayBtn = document.getElementById('detail-play-btn');
+const detailTrailerBtn = document.getElementById('detail-trailer-btn');
+const detailWatchlistBtn = document.getElementById('detail-watchlist-btn');
+const detailPlayerSection = document.getElementById('detail-player-section');
+const detailPlayerCloseBtn = document.getElementById('detail-player-close-btn');
+const detailPlayerExternalLink = document.getElementById('detail-player-external-link');
+const detailTrailerIframe = document.getElementById('detail-trailer-iframe');
+const detailCastRow = document.getElementById('detail-cast-row');
+const detailSeasonsSection = document.getElementById('detail-seasons-section');
+const detailSeasonsGrid = document.getElementById('detail-seasons-grid');
+const detailOrigTitle = document.getElementById('detail-orig-title');
+const detailStatus = document.getElementById('detail-status');
+const detailReleaseDate = document.getElementById('detail-release-date');
+const detailOrigLang = document.getElementById('detail-orig-lang');
+const detailRecommendationsRow = document.getElementById('detail-recommendations-row');
 
 // Nuvio Auth Modal Elements
 const authModal = document.getElementById('auth-modal');
@@ -529,11 +539,11 @@ function updateWatchlistButtons() {
             : '<i class="fi fi-tr-plus"></i> Watchlist';
     }
 
-    if (state.activeModalItem) {
+    if (state.activeModalItem && detailWatchlistBtn) {
         const isAdded = isInWatchlist(state.activeModalItem.id, getMediaType(state.activeModalItem));
-        modalWatchlistBtn.innerHTML = isAdded
+        detailWatchlistBtn.innerHTML = isAdded
             ? '<i class="fi fi-tr-check"></i> In Watchlist'
-            : '<i class="fi fi-tr-plus"></i> Add to Watchlist';
+            : '<i class="fi fi-tr-plus"></i> Watchlist';
     }
 }
 
@@ -1126,6 +1136,10 @@ function renderSettingsView() {
 }
 
 function switchView(viewName) {
+    if (detailScreen && detailScreen.style.display !== 'none') {
+        closeDetailScreen();
+    }
+
     state.currentView = viewName;
     navItems.forEach(item => {
         if (item.getAttribute('data-view') === viewName) {
@@ -1233,34 +1247,83 @@ searchClearBtn.addEventListener('click', () => {
     }
 });
 
-// --- Movie Detail Modal & Streaming Playback Logic ---
-async function openModal(id, type = 'movie', directImdbId = null) {
+// --- Video & Trailer Resolution Helper ---
+async function getBestTrailer(id, type, tmdbData) {
+    let videos = tmdbData?.videos?.results;
+    if (!Array.isArray(videos) || videos.length === 0) {
+        try {
+            const fallback = await fetchTMDB(`/${type}/${id}/videos`);
+            videos = fallback?.results || [];
+        } catch (e) {
+            videos = [];
+        }
+    }
+    if (!Array.isArray(videos) || videos.length === 0) return null;
+    const yt = videos.filter(v => v.site === 'YouTube' && v.key);
+    if (yt.length === 0) return null;
+
+    // Prioritize official trailer > any trailer > official teaser > any teaser > clip > first available
+    return yt.find(v => v.type === 'Trailer' && v.official)
+        || yt.find(v => v.type === 'Trailer')
+        || yt.find(v => v.type === 'Teaser' && v.official)
+        || yt.find(v => v.type === 'Teaser')
+        || yt.find(v => v.type === 'Clip')
+        || yt[0];
+}
+
+function playTrailerVideo(video) {
+    if (!video || !video.key) {
+        alert('No trailer available for this title.');
+        return;
+    }
+    const embedUrl = `https://www.youtube-nocookie.com/embed/${video.key}?autoplay=1&enablejsapi=1&rel=0&playsinline=1`;
+    detailTrailerIframe.src = embedUrl;
+    detailPlayerSection.style.display = 'block';
+
+    if (detailPlayerExternalLink) {
+        detailPlayerExternalLink.href = `https://www.youtube.com/watch?v=${video.key}`;
+        detailPlayerExternalLink.style.display = 'inline-flex';
+    }
+
+    detailPlayerSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    if (state.activeModalItem) {
+        recordWatchProgress(state.activeModalItem, 15);
+    }
+}
+
+function closeDetailScreen() {
+    if (detailTrailerIframe) detailTrailerIframe.src = '';
+    if (detailPlayerSection) detailPlayerSection.style.display = 'none';
+    if (detailScreen) detailScreen.style.display = 'none';
+    if (contentContainer) contentContainer.style.display = 'block';
+    state.activeModalItem = null;
+    state.activeTrailerVideo = null;
+}
+
+// --- Full Detail Screen & Media Inspection ---
+async function openModal(id, type = 'movie', directImdbId = null, autoPlayTrailer = false) {
     let imdbId = directImdbId;
     let data = null;
 
     if (String(id).startsWith('tt')) {
         imdbId = id;
-    }
-
-    // Fetch TMDB details
-    if (!String(id).startsWith('tt')) {
-        data = await fetchTMDB(`/${type}/${id}`, { append_to_response: 'videos,credits,external_ids' });
-        if (data && data.external_ids && data.external_ids.imdb_id) {
-            imdbId = data.external_ids.imdb_id;
-        }
-    } else {
-        // Find by IMDb ID
         const findData = await fetchTMDB(`/find/${id}`, { external_source: 'imdb_id' });
         if (findData) {
             const results = (type === 'tv' ? findData.tv_results : findData.movie_results) || findData.movie_results;
             if (results && results.length > 0) {
-                data = await fetchTMDB(`/${type}/${results[0].id}`, { append_to_response: 'videos,credits,external_ids' });
+                data = await fetchTMDB(`/${type}/${results[0].id}`, { append_to_response: 'videos,credits,external_ids,recommendations,similar' });
             }
+        }
+    } else {
+        data = await fetchTMDB(`/${type}/${id}`, { append_to_response: 'videos,credits,external_ids,recommendations,similar' });
+        if (data?.external_ids?.imdb_id) {
+            imdbId = data.external_ids.imdb_id;
         }
     }
 
     if (!data) {
-        data = { id, title: 'Streaming Title', overview: 'High-definition media playback' };
+        data = { id, title: 'Title', overview: 'Media details' };
     }
 
     data.media_type = type;
@@ -1272,95 +1335,119 @@ async function openModal(id, type = 'movie', directImdbId = null) {
     const rating = getRating(data);
     const runtime = data.runtime ? `${data.runtime} min` : (data.number_of_seasons ? `${data.number_of_seasons} Season${data.number_of_seasons > 1 ? 's' : ''}` : '');
     const backdropUrl = data.backdrop_path ? `${IMG_BACKDROP}${data.backdrop_path}` : (data.poster_path ? `${IMG_POSTER}${data.poster_path}` : '');
+    const posterUrl = data.poster_path ? `${IMG_POSTER}${data.poster_path}` : PLACEHOLDER_POSTER;
 
-    modalTitle.textContent = title;
-    modalRating.innerHTML = `<i class="fi fi-tr-star"></i> ${rating}`;
-    modalYear.textContent = year;
-    modalRuntime.textContent = runtime;
-    modalOverview.textContent = data.overview || 'No synopsis available.';
+    // Populate Hero Details
+    detailBackdropBg.style.backgroundImage = backdropUrl ? `url("${backdropUrl}")` : 'none';
+    detailPosterImg.src = posterUrl;
+    detailTypeBadge.textContent = type === 'tv' ? 'SERIES' : 'MOVIE';
+    detailTitle.textContent = title;
+    detailTagline.textContent = data.tagline || '';
+    detailRating.innerHTML = `<i class="fi fi-tr-star"></i> ${rating}`;
+    detailYear.textContent = year;
+    detailRuntime.textContent = runtime;
+    detailOverview.textContent = data.overview || 'No synopsis available.';
 
     // Genres
-    modalGenres.innerHTML = (data.genres || [])
+    detailGenres.innerHTML = (data.genres || [])
         .map(g => `<span class="genre-tag">${g.name}</span>`)
         .join('');
 
-    // Cast
-    const topCast = (data.credits && data.credits.cast ? data.credits.cast.slice(0, 5) : [])
-        .map(c => c.name)
-        .join(', ');
-    modalCast.innerHTML = topCast ? `<strong>Cast:</strong> ${topCast}` : '';
+    // Meta details card
+    detailOrigTitle.textContent = data.original_title || data.original_name || title;
+    detailStatus.textContent = data.status || 'Released';
+    detailReleaseDate.textContent = data.release_date || data.first_air_date || year || 'N/A';
+    detailOrigLang.textContent = (data.original_language || 'en').toUpperCase();
 
-    // Backdrop & Video
-    modalBackdrop.src = backdropUrl;
-    modalBackdropWrap.style.display = 'block';
-    modalVideoWrap.style.display = 'none';
-    modalTrailerIframe.src = '';
-
-    const trailer = data.videos && data.videos.results
-        ? data.videos.results.find(v => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'))
-        : null;
-
-    if (trailer) {
-        modalPlayTrailerBtn.style.display = 'flex';
-        modalPlayTrailerBtn.onclick = () => {
-            modalBackdropWrap.style.display = 'none';
-            modalVideoWrap.style.display = 'block';
-            modalTrailerIframe.src = `https://www.youtube.com/embed/${trailer.key}?autoplay=1`;
-            // Record watching progress
-            recordWatchProgress(data, 25);
-        };
+    // Cast Row
+    if (data.credits && data.credits.cast && data.credits.cast.length > 0) {
+        detailCastRow.innerHTML = data.credits.cast.slice(0, 10).map(c => {
+            const avatar = c.profile_path ? `${IMG_POSTER}${c.profile_path}` : PLACEHOLDER_POSTER;
+            return `
+                <div class="cast-card">
+                    <img class="cast-avatar" src="${avatar}" alt="${c.name}" loading="lazy" onerror="this.src='${PLACEHOLDER_POSTER}'">
+                    <span class="cast-name">${c.name}</span>
+                    <span class="cast-character">${c.character || ''}</span>
+                </div>
+            `;
+        }).join('');
     } else {
-        modalPlayTrailerBtn.style.display = 'none';
+        detailCastRow.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No cast information available.</p>';
     }
 
-    // Load Streaming Sources from Active Addons
-    modalStreamsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">Resolving streams from streaming addons...</p>';
-    if (imdbId) {
-        fetchStreamsForMedia(imdbId, type).then(streams => {
-            if (streams && streams.length > 0) {
-                modalStreamsList.innerHTML = streams.slice(0, 10).map(s => {
-                    const quality = s.name.replace('\n', ' • ');
-                    const details = s.title.split('\n')[0];
-                    return `
-                        <div class="stream-item" onclick="handleSelectStream('${encodeURIComponent(details)}')">
-                            <div class="stream-meta">
-                                <span class="stream-name">${details}</span>
-                                <span class="stream-details">${s.title.replace(/\n/g, ' ')}</span>
-                            </div>
-                            <span class="stream-badge">${quality}</span>
-                        </div>
-                    `;
-                }).join('');
-            } else {
-                modalStreamsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No direct torrent/debrid streams found for this title.</p>';
+    // TV Seasons
+    if (type === 'tv' && data.seasons && data.seasons.length > 0) {
+        detailSeasonsSection.style.display = 'block';
+        detailSeasonsGrid.innerHTML = data.seasons.map(s => `
+            <div class="season-card">
+                <div class="season-name">${s.name}</div>
+                <div class="season-episodes">${s.episode_count || 0} Episodes</div>
+            </div>
+        `).join('');
+    } else {
+        detailSeasonsSection.style.display = 'none';
+        detailSeasonsGrid.innerHTML = '';
+    }
+
+    // More Like This / Recommendations
+    const recs = (data.recommendations?.results?.length > 0 ? data.recommendations.results : data.similar?.results) || [];
+    if (recs.length > 0) {
+        detailRecommendationsRow.innerHTML = '';
+        recs.slice(0, 12).forEach(item => {
+            if (item.poster_path || item.backdrop_path) {
+                detailRecommendationsRow.appendChild(createMediaCard(item));
             }
         });
     } else {
-        modalStreamsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">Trailer available above.</p>';
+        detailRecommendationsRow.innerHTML = '<p style="color: var(--text-muted); padding: 1rem;">No recommendations found.</p>';
     }
+
+    // Resolve Trailer
+    const trailerVideo = await getBestTrailer(data.id, type, data);
+    state.activeTrailerVideo = trailerVideo;
+
+    // Reset Player section
+    detailTrailerIframe.src = '';
+    detailPlayerSection.style.display = 'none';
+
+    // Play Button & Watch Trailer Button Handlers
+    detailPlayBtn.onclick = () => {
+        if (trailerVideo) {
+            playTrailerVideo(trailerVideo);
+        } else {
+            alert(`Playback ready for: ${title}`);
+            recordWatchProgress(data, 10);
+        }
+    };
+
+    detailTrailerBtn.onclick = () => {
+        if (trailerVideo) {
+            playTrailerVideo(trailerVideo);
+        } else {
+            alert('No trailer available for this title.');
+        }
+    };
 
     updateWatchlistButtons();
-    detailModal.classList.add('active');
-}
 
-// Global handler when user clicks a stream
-window.handleSelectStream = function(streamTitle) {
-    if (state.activeModalItem) {
-        recordWatchProgress(state.activeModalItem, 35);
-        alert(`Starting stream: ${decodeURIComponent(streamTitle)}\nAdded to Continue Watching.`);
+    // Show Detail Screen and hide main scroll container
+    contentContainer.style.display = 'none';
+    detailScreen.style.display = 'block';
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
+    if (autoPlayTrailer && trailerVideo) {
+        playTrailerVideo(trailerVideo);
     }
-};
-
-function closeModal() {
-    detailModal.classList.remove('active');
-    modalTrailerIframe.src = '';
-    state.activeModalItem = null;
 }
 
-modalCloseBtn.addEventListener('click', closeModal);
-detailModal.addEventListener('click', (e) => {
-    if (e.target === detailModal) closeModal();
-});
+// Detail Screen Back and Player Close Listeners
+if (detailBackBtn) detailBackBtn.onclick = closeDetailScreen;
+if (detailPlayerCloseBtn) {
+    detailPlayerCloseBtn.onclick = () => {
+        detailTrailerIframe.src = '';
+        detailPlayerSection.style.display = 'none';
+    };
+}
 
 // --- Nuvio Authentication Logic (https://nuvio.tv/docs) ---
 function openAuthModal(mode = 'login') {
@@ -1481,20 +1568,15 @@ authForm.addEventListener('submit', handleNuvioAuth);
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-        if (detailModal.classList.contains('active')) closeModal();
-        if (authModal.classList.contains('active')) closeAuthModal();
+        if (detailScreen && detailScreen.style.display !== 'none') closeDetailScreen();
+        if (authModal && authModal.classList.contains('active')) closeAuthModal();
     }
 });
 
 // --- Action Button Listeners ---
 heroPlayBtn.addEventListener('click', () => {
     if (state.featuredItem) {
-        openModal(state.featuredItem.id, getMediaType(state.featuredItem), state.featuredItem.imdb_id);
-        setTimeout(() => {
-            if (modalPlayTrailerBtn.style.display !== 'none') {
-                modalPlayTrailerBtn.click();
-            }
-        }, 400);
+        openModal(state.featuredItem.id, getMediaType(state.featuredItem), state.featuredItem.imdb_id, true);
     }
 });
 
@@ -1506,15 +1588,17 @@ heroWatchlistBtn.addEventListener('click', () => {
 
 heroInfoBtn.addEventListener('click', () => {
     if (state.featuredItem) {
-        openModal(state.featuredItem.id, getMediaType(state.featuredItem), state.featuredItem.imdb_id);
+        openModal(state.featuredItem.id, getMediaType(state.featuredItem), state.featuredItem.imdb_id, false);
     }
 });
 
-modalWatchlistBtn.addEventListener('click', () => {
-    if (state.activeModalItem) {
-        toggleWatchlist(state.activeModalItem);
-    }
-});
+if (detailWatchlistBtn) {
+    detailWatchlistBtn.addEventListener('click', () => {
+        if (state.activeModalItem) {
+            toggleWatchlist(state.activeModalItem);
+        }
+    });
+}
 
 // --- Initialize Navigation & App ---
 navItems.forEach(item => {
