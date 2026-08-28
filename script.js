@@ -546,6 +546,31 @@ function updateHeroBanner(item, customBadge = 'Featured') {
     updateWatchlistButtons();
 }
 
+/**
+ * Deduplicate items so that each movie / show appears only once across the entire view
+ */
+function filterUniqueMedia(items, seenSet) {
+    if (!items || !Array.isArray(items)) return [];
+    return items.filter(item => {
+        if (!item) return false;
+        const id = item.id || item.imdb_id;
+        const title = (item.title || item.name || '').toLowerCase().trim();
+        const mediaType = getMediaType(item);
+        
+        const primaryKey = `${id}-${mediaType}`;
+        if (id && seenSet.has(primaryKey)) return false;
+        if (item.imdb_id && seenSet.has(item.imdb_id)) return false;
+        if (title && seenSet.has(`title:${title}`)) return false;
+
+        // Register in seenSet
+        if (id) seenSet.add(primaryKey);
+        if (item.imdb_id) seenSet.add(item.imdb_id);
+        if (title) seenSet.add(`title:${title}`);
+
+        return true;
+    });
+}
+
 // --- Views & Navigation ---
 async function renderHomeView() {
     heroBanner.style.display = 'flex';
@@ -560,16 +585,16 @@ async function renderHomeView() {
         }
     }
 
+    const seenSet = new Set();
+
     // 2. Build personalized recommendations if user has Continue Watching items
     let becauseYouWatchedSection = null;
     let moreLikeSecondSection = null;
-    let topPicksSection = null;
 
     if (state.continueWatching && state.continueWatching.length > 0) {
         const firstItem = state.continueWatching[0];
         const firstType = firstItem.mediaType === 'tv' ? 'tv' : 'movie';
         
-        // Fetch recommendations for the latest watched title
         if (!isNaN(Number(firstItem.id))) {
             const [recData, similarData] = await Promise.all([
                 fetchTMDB(`/${firstType}/${firstItem.id}/recommendations`),
@@ -587,7 +612,6 @@ async function renderHomeView() {
             }
         }
 
-        // If user has a 2nd continue watching title, fetch recommendations for it too
         if (state.continueWatching.length > 1) {
             const secondItem = state.continueWatching[1];
             const secondType = secondItem.mediaType === 'tv' ? 'tv' : 'movie';
@@ -618,49 +642,75 @@ async function renderHomeView() {
     if (trending && trending.results && trending.results.length > 0) {
         const heroItem = trending.results.find(i => i.backdrop_path) || trending.results[0];
         updateHeroBanner(heroItem, 'Featured');
+        seenSet.add(`${heroItem.id}-${getMediaType(heroItem)}`);
+        if (heroItem.title) seenSet.add(`title:${heroItem.title.toLowerCase().trim()}`);
     }
 
-    // 2. Continue Watching (Prominent First Row)
+    // 2. Continue Watching (Unique items)
     if (state.continueWatching && state.continueWatching.length > 0) {
-        const cwSection = createMediaSection('Continue Watching', state.continueWatching, null, true);
-        if (cwSection) sectionsContainer.appendChild(cwSection);
+        const uniqueCW = filterUniqueMedia(state.continueWatching, seenSet);
+        if (uniqueCW.length > 0) {
+            const cwSection = createMediaSection('Continue Watching', uniqueCW, null, true);
+            if (cwSection) sectionsContainer.appendChild(cwSection);
+        }
     }
 
     // 3. Personalized Recommendation: "Because You Watched {Title}"
     if (becauseYouWatchedSection && becauseYouWatchedSection.items.length > 0) {
-        const recSection = createMediaSection(becauseYouWatchedSection.title, becauseYouWatchedSection.items);
-        if (recSection) sectionsContainer.appendChild(recSection);
+        const uniqueRec1 = filterUniqueMedia(becauseYouWatchedSection.items, seenSet);
+        if (uniqueRec1.length > 0) {
+            const recSection = createMediaSection(becauseYouWatchedSection.title, uniqueRec1);
+            if (recSection) sectionsContainer.appendChild(recSection);
+        }
     }
 
     // 4. Personalized Recommendation: "More Like {2nd Title}"
     if (moreLikeSecondSection && moreLikeSecondSection.items.length > 0) {
-        const moreSection = createMediaSection(moreLikeSecondSection.title, moreLikeSecondSection.items);
-        if (moreSection) sectionsContainer.appendChild(moreSection);
+        const uniqueRec2 = filterUniqueMedia(moreLikeSecondSection.items, seenSet);
+        if (uniqueRec2.length > 0) {
+            const moreSection = createMediaSection(moreLikeSecondSection.title, uniqueRec2);
+            if (moreSection) sectionsContainer.appendChild(moreSection);
+        }
     }
 
     // 5. Trending Today
     if (trending && trending.results) {
-        sectionsContainer.appendChild(createMediaSection('Trending Today', trending.results));
+        const uniqueTrending = filterUniqueMedia(trending.results, seenSet);
+        if (uniqueTrending.length > 0) {
+            sectionsContainer.appendChild(createMediaSection('Trending Today', uniqueTrending));
+        }
     }
 
     // 6. Top Picks for You (Action & Blockbusters)
     if (actionTrending && actionTrending.results) {
-        sectionsContainer.appendChild(createMediaSection('Top Picks for You', actionTrending.results));
+        const uniqueAction = filterUniqueMedia(actionTrending.results, seenSet);
+        if (uniqueAction.length > 0) {
+            sectionsContainer.appendChild(createMediaSection('Top Picks for You', uniqueAction));
+        }
     }
 
     // 7. Popular TV Series
     if (popularTV && popularTV.results) {
-        sectionsContainer.appendChild(createMediaSection('Popular TV Series', popularTV.results));
+        const uniqueTV = filterUniqueMedia(popularTV.results, seenSet);
+        if (uniqueTV.length > 0) {
+            sectionsContainer.appendChild(createMediaSection('Popular TV Series', uniqueTV));
+        }
     }
 
     // 8. Critically Acclaimed Movies
     if (topRatedMovies && topRatedMovies.results) {
-        sectionsContainer.appendChild(createMediaSection('Critically Acclaimed Movies', topRatedMovies.results));
+        const uniqueTopRated = filterUniqueMedia(topRatedMovies.results, seenSet);
+        if (uniqueTopRated.length > 0) {
+            sectionsContainer.appendChild(createMediaSection('Critically Acclaimed Movies', uniqueTopRated));
+        }
     }
 
-    // 9. Popular Movies
+    // 9. Popular Blockbusters
     if (popularMovies && popularMovies.results) {
-        sectionsContainer.appendChild(createMediaSection('Popular Blockbusters', popularMovies.results));
+        const uniquePopular = filterUniqueMedia(popularMovies.results, seenSet);
+        if (uniquePopular.length > 0) {
+            sectionsContainer.appendChild(createMediaSection('Popular Blockbusters', uniquePopular));
+        }
     }
 }
 
@@ -668,6 +718,7 @@ async function renderMoviesView() {
     heroBanner.style.display = 'none';
     sectionsContainer.innerHTML = '<div style="text-align:center; padding: 2rem;"><p>Loading movies...</p></div>';
 
+    const seenSet = new Set();
     const [popular, topRated, action, horror, scifi] = await Promise.all([
         fetchTMDB('/movie/popular'),
         fetchTMDB('/movie/top_rated'),
@@ -677,17 +728,33 @@ async function renderMoviesView() {
     ]);
 
     sectionsContainer.innerHTML = '';
-    if (popular && popular.results) sectionsContainer.appendChild(createMediaSection('Popular Movies', popular.results));
-    if (topRated && topRated.results) sectionsContainer.appendChild(createMediaSection('Top Rated Movies', topRated.results));
-    if (action && action.results) sectionsContainer.appendChild(createMediaSection('Action Blockbusters', action.results));
-    if (scifi && scifi.results) sectionsContainer.appendChild(createMediaSection('Sci-Fi & Fantasy', scifi.results));
-    if (horror && horror.results) sectionsContainer.appendChild(createMediaSection('Horror & Thrillers', horror.results));
+    if (popular && popular.results) {
+        const u = filterUniqueMedia(popular.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Popular Movies', u));
+    }
+    if (topRated && topRated.results) {
+        const u = filterUniqueMedia(topRated.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Top Rated Movies', u));
+    }
+    if (action && action.results) {
+        const u = filterUniqueMedia(action.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Action Blockbusters', u));
+    }
+    if (scifi && scifi.results) {
+        const u = filterUniqueMedia(scifi.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Sci-Fi & Fantasy', u));
+    }
+    if (horror && horror.results) {
+        const u = filterUniqueMedia(horror.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Horror & Thrillers', u));
+    }
 }
 
 async function renderTVView() {
     heroBanner.style.display = 'none';
     sectionsContainer.innerHTML = '<div style="text-align:center; padding: 2rem;"><p>Loading TV shows...</p></div>';
 
+    const seenSet = new Set();
     const [popular, topRated, drama, comedy] = await Promise.all([
         fetchTMDB('/tv/popular'),
         fetchTMDB('/tv/top_rated'),
@@ -696,10 +763,22 @@ async function renderTVView() {
     ]);
 
     sectionsContainer.innerHTML = '';
-    if (popular && popular.results) sectionsContainer.appendChild(createMediaSection('Popular TV Series', popular.results));
-    if (topRated && topRated.results) sectionsContainer.appendChild(createMediaSection('Critically Acclaimed TV', topRated.results));
-    if (drama && drama.results) sectionsContainer.appendChild(createMediaSection('Gripping Dramas', drama.results));
-    if (comedy && comedy.results) sectionsContainer.appendChild(createMediaSection('Comedy Series', comedy.results));
+    if (popular && popular.results) {
+        const u = filterUniqueMedia(popular.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Popular TV Series', u));
+    }
+    if (topRated && topRated.results) {
+        const u = filterUniqueMedia(topRated.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Critically Acclaimed TV', u));
+    }
+    if (drama && drama.results) {
+        const u = filterUniqueMedia(drama.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Gripping Dramas', u));
+    }
+    if (comedy && comedy.results) {
+        const u = filterUniqueMedia(comedy.results, seenSet);
+        if (u.length > 0) sectionsContainer.appendChild(createMediaSection('Comedy Series', u));
+    }
 }
 
 function renderWatchlistView() {
