@@ -182,8 +182,9 @@ const detailPlayerCloseBtn = document.getElementById('detail-player-close-btn');
 const detailPlayerExternalLink = document.getElementById('detail-player-external-link');
 const detailTrailerIframe = document.getElementById('detail-trailer-iframe');
 const detailCastRow = document.getElementById('detail-cast-row');
-const detailSeasonsSection = document.getElementById('detail-seasons-section');
-const detailSeasonsGrid = document.getElementById('detail-seasons-grid');
+const detailEpisodesSection = document.getElementById('detail-episodes-section');
+const detailSeasonSelect = document.getElementById('detail-season-select');
+const detailEpisodesList = document.getElementById('detail-episodes-list');
 const detailOrigTitle = document.getElementById('detail-orig-title');
 const detailStatus = document.getElementById('detail-status');
 const detailReleaseDate = document.getElementById('detail-release-date');
@@ -1300,6 +1301,90 @@ function closeDetailScreen() {
     state.activeTrailerVideo = null;
 }
 
+// --- TV Episodes Loader with Poster and Details ---
+async function loadSeasonEpisodes(tvId, seasonNumber, showData) {
+    if (!detailEpisodesList) return;
+    detailEpisodesList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem; padding: 1.5rem 0;">Loading episodes...</p>';
+    try {
+        const seasonData = await fetchTMDB(`/tv/${tvId}/season/${seasonNumber}`);
+        if (!seasonData || !seasonData.episodes || seasonData.episodes.length === 0) {
+            detailEpisodesList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem; padding: 1.5rem 0;">No episode information available for this season.</p>';
+            return;
+        }
+
+        const showTitle = getTitle(showData);
+        detailEpisodesList.innerHTML = seasonData.episodes.map(ep => {
+            const stillUrl = ep.still_path 
+                ? `${IMG_POSTER}${ep.still_path}` 
+                : (showData.backdrop_path ? `${IMG_BACKDROP}${showData.backdrop_path}` : PLACEHOLDER_POSTER);
+            const runtimeStr = ep.runtime ? `${ep.runtime} min` : '';
+            const ratingStr = ep.vote_average ? ep.vote_average.toFixed(1) : '';
+            const airDateStr = ep.air_date ? new Date(ep.air_date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+            const epNum = ep.episode_number || 1;
+            const epTitle = ep.name || `Episode ${epNum}`;
+            const overview = ep.overview || 'No synopsis available for this episode.';
+
+            return `
+                <div class="episode-card" data-season="${seasonNumber}" data-episode="${epNum}">
+                    <div class="episode-still-wrap">
+                        <img class="episode-still" src="${stillUrl}" alt="${epTitle}" loading="lazy" onerror="this.src='${PLACEHOLDER_POSTER}'">
+                        <div class="episode-play-overlay">
+                            <div class="episode-play-icon"><i class="fi fi-tr-play"></i></div>
+                        </div>
+                        ${runtimeStr ? `<span class="episode-runtime">${runtimeStr}</span>` : ''}
+                    </div>
+                    <div class="episode-info">
+                        <div class="episode-title-row">
+                            <h4 class="episode-title">
+                                <span class="episode-num">${epNum}.</span> ${epTitle}
+                            </h4>
+                            ${ratingStr ? `<span class="episode-rating"><i class="fi fi-tr-star"></i> ${ratingStr}</span>` : ''}
+                        </div>
+                        <div class="episode-meta">
+                            ${airDateStr ? `<span>${airDateStr}</span>` : ''}
+                            ${runtimeStr ? `<span>${runtimeStr}</span>` : ''}
+                        </div>
+                        <p class="episode-overview">${overview}</p>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Wire episode card clicks
+        detailEpisodesList.querySelectorAll('.episode-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const sNum = card.getAttribute('data-season');
+                const eNum = card.getAttribute('data-episode');
+                const epObj = seasonData.episodes.find(e => e.episode_number === Number(eNum));
+                const fullEpTitle = `${showTitle} S${sNum}E${eNum}: ${epObj ? epObj.name : `Episode ${eNum}`}`;
+                
+                // Record progress with episode information
+                const progressItem = {
+                    ...showData,
+                    title: fullEpTitle,
+                    name: fullEpTitle,
+                    mediaType: 'tv',
+                    media_type: 'tv',
+                    season: Number(sNum),
+                    episode: Number(eNum),
+                    episode_title: epObj ? epObj.name : `Episode ${eNum}`,
+                    still_path: epObj ? epObj.still_path : null
+                };
+                recordWatchProgress(progressItem, 10);
+
+                if (state.activeTrailerVideo) {
+                    playTrailerVideo(state.activeTrailerVideo);
+                } else {
+                    alert(`Selected: ${fullEpTitle}`);
+                }
+            });
+        });
+    } catch (err) {
+        console.error('Error fetching season episodes:', err);
+        detailEpisodesList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem; padding: 1.5rem 0;">Unable to load episodes at this time.</p>';
+    }
+}
+
 // --- Full Detail Screen & Media Inspection ---
 async function openModal(id, type = 'movie', directImdbId = null, autoPlayTrailer = false) {
     let imdbId = directImdbId;
@@ -1374,18 +1459,33 @@ async function openModal(id, type = 'movie', directImdbId = null, autoPlayTraile
         detailCastRow.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No cast information available.</p>';
     }
 
-    // TV Seasons
+    // TV Episodes Section
     if (type === 'tv' && data.seasons && data.seasons.length > 0) {
-        detailSeasonsSection.style.display = 'block';
-        detailSeasonsGrid.innerHTML = data.seasons.map(s => `
-            <div class="season-card">
-                <div class="season-name">${s.name}</div>
-                <div class="season-episodes">${s.episode_count || 0} Episodes</div>
-            </div>
+        detailEpisodesSection.style.display = 'block';
+        
+        // Filter regular seasons (season_number > 0), falling back to specials if needed
+        const regularSeasons = data.seasons.filter(s => s.season_number > 0);
+        const allSeasons = regularSeasons.length > 0 ? regularSeasons : data.seasons;
+        
+        // Populate Season Dropdown
+        detailSeasonSelect.innerHTML = allSeasons.map(s => `
+            <option value="${s.season_number}">${s.name} (${s.episode_count || 0} Episodes)</option>
         `).join('');
+
+        const initialSeason = allSeasons[0].season_number;
+        detailSeasonSelect.value = initialSeason;
+
+        // Load initial season episodes with posters and details
+        loadSeasonEpisodes(data.id, initialSeason, data);
+
+        // Listen for season changes
+        detailSeasonSelect.onchange = () => {
+            loadSeasonEpisodes(data.id, Number(detailSeasonSelect.value), data);
+        };
     } else {
-        detailSeasonsSection.style.display = 'none';
-        detailSeasonsGrid.innerHTML = '';
+        detailEpisodesSection.style.display = 'none';
+        detailEpisodesList.innerHTML = '';
+        detailSeasonSelect.innerHTML = '';
     }
 
     // More Like This / Recommendations

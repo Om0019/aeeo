@@ -193,9 +193,17 @@
                         <div class="detail-cast-row" id="detail-cast-row"></div>
                     </div>
 
-                    <div class="detail-section-block" id="detail-seasons-section" style="display: none;">
-                        <h3 class="detail-subheading">Seasons</h3>
-                        <div class="detail-seasons-grid" id="detail-seasons-grid"></div>
+                    <!-- TV Episodes Section with Season Selector (Visible for TV Series) -->
+                    <div class="detail-section-block" id="detail-episodes-section" style="display: none;">
+                        <div class="episodes-header">
+                            <h3 class="detail-subheading" style="margin-bottom: 0;">Episodes</h3>
+                            <div class="season-select-wrap">
+                                <select id="detail-season-select" class="season-select" aria-label="Select Season"></select>
+                            </div>
+                        </div>
+                        <div class="episodes-list" id="detail-episodes-list">
+                            <!-- Episodes injected dynamically with poster, title, duration & details -->
+                        </div>
                     </div>
                 </div>
 
