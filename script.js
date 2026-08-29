@@ -1853,12 +1853,24 @@ function playMediaStream(stream, streamIndex = 0, isAuto = false) {
             hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
                 attemptPlay();
             });
+            let networkErrorRetries = 0;
             hlsInstance.on(Hls.Events.ERROR, (event, data) => {
                 if (data.fatal) {
                     switch (data.type) {
                         case Hls.ErrorTypes.NETWORK_ERROR:
-                            console.warn('HLS Network Error, attempting recovery...');
-                            hlsInstance.startLoad();
+                            // A permanently-broken source (e.g. a blocked/expired upstream CDN link)
+                            // fails every retry, so cap attempts before failing over instead of
+                            // retrying forever and leaving playback stuck.
+                            if (networkErrorRetries < 2) {
+                                networkErrorRetries++;
+                                console.warn(`HLS Network Error, attempting recovery (${networkErrorRetries}/2)...`);
+                                hlsInstance.startLoad();
+                            } else {
+                                console.warn('HLS Network Error persisted, failing over to next stream...');
+                                if (hlsInstance) hlsInstance.destroy();
+                                hlsInstance = null;
+                                tryNextStream();
+                            }
                             break;
                         case Hls.ErrorTypes.MEDIA_ERROR:
                             console.warn('HLS Media Error, attempting recovery...');
