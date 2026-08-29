@@ -1731,51 +1731,56 @@ function formatStreamLabel(stream, addonName) {
 
 function renderStreamSelector(sessionToken) {
     if (!state.currentStreamSession || state.currentStreamSession.token !== sessionToken) return;
-    if (state.activeStreams.length <= 1) return;
+    if (state.activeStreams.length === 0) return;
 
     if (detailStreamSelectorWrap && detailStreamSelect) {
         detailStreamSelectorWrap.style.display = 'block';
+        
         detailStreamSelect.innerHTML = state.activeStreams.map((s, idx) => `
-            <option value="${idx}" ${idx === currentPlayingStreamIndex ? 'selected' : ''}>${s.__label}</option>
+            <option value="${idx}">${s.__label}</option>
         `).join('');
+
+        const targetIdx = (currentPlayingStreamIndex >= 0 && currentPlayingStreamIndex < state.activeStreams.length)
+            ? currentPlayingStreamIndex
+            : 0;
+
+        detailStreamSelect.value = String(targetIdx);
 
         detailStreamSelect.onchange = () => {
             const idx = Number(detailStreamSelect.value);
             if (state.activeStreams[idx]) {
-                playMediaStream(state.activeStreams[idx], idx);
+                playMediaStream(state.activeStreams[idx], idx, false);
             }
         };
     }
 }
 
-function tryNextStream() {
+function tryNextStream(isAutoFailover = true) {
+    if (!isAutoFailover) return;
     const nextIndex = currentPlayingStreamIndex + 1;
     if (nextIndex < state.activeStreams.length) {
-        console.warn(`Stream ${currentPlayingStreamIndex} failed, automatically trying next stream ${nextIndex}:`, state.activeStreams[nextIndex].__label);
+        console.log(`Trying next available stream (${nextIndex}):`, state.activeStreams[nextIndex].__label);
         if (detailStreamSelect) detailStreamSelect.value = String(nextIndex);
-        playMediaStream(state.activeStreams[nextIndex], nextIndex);
+        playMediaStream(state.activeStreams[nextIndex], nextIndex, true);
     } else {
-        console.warn('All streams failed.');
-        if (state.activeTrailerVideo) {
-            playerLoaderSubtext.textContent = 'All streams failed. Playing official trailer...';
-            playerLoadingOverlay.style.display = 'flex';
-            setTimeout(() => playTrailerVideo(state.activeTrailerVideo), 1500);
-        } else {
-            playerLoaderSubtext.textContent = 'Unable to play stream. Please choose another stream from the dropdown.';
-            playerLoadingOverlay.style.display = 'flex';
-            setTimeout(() => { playerLoadingOverlay.style.display = 'none'; }, 2500);
-        }
+        console.warn('All available streams attempted.');
+        playerLoaderSubtext.textContent = 'Playback stopped. Please select another stream from the dropdown above.';
+        playerLoadingOverlay.style.display = 'flex';
+        setTimeout(() => { playerLoadingOverlay.style.display = 'none'; }, 3000);
     }
 }
 
-function playMediaStream(stream, streamIndex = 0) {
+function playMediaStream(stream, streamIndex = 0, isAuto = false) {
     if (!stream || !stream.url) {
         console.warn('Invalid stream:', stream);
-        tryNextStream();
+        if (isAuto) tryNextStream(true);
         return;
     }
 
     currentPlayingStreamIndex = streamIndex;
+    if (detailStreamSelect) detailStreamSelect.value = String(streamIndex);
+    if (detailStreamSelectorWrap) detailStreamSelectorWrap.style.display = 'block';
+
     const streamUrl = stream.url;
     const isWeb = isWebPlayableStream(stream);
     const isHLS = streamUrl.includes('.m3u8') || stream.behaviorHints?.proxyHeaders?.request?.['User-Agent'];
@@ -1793,30 +1798,26 @@ function playMediaStream(stream, streamIndex = 0) {
     const label = stream.__label || stream.title || stream.name || 'Playback';
     detailPlayerTitle.innerHTML = `<i class="fi fi-tr-play"></i> <span>${label}</span>`;
 
-    // If stream is not web-playable (e.g. Torrentio MKV / debrid), don't break the player;
-    // auto-try the next web stream if available
-    if (!isWeb) {
-        console.warn('Stream is not web-ready, checking if next stream is available:', label);
-        if (streamIndex === 0 && state.activeStreams.some((s, idx) => idx > streamIndex && isWebPlayableStream(s))) {
-            tryNextStream();
+    // If auto-playing and stream is not web-ready, try next stream
+    if (!isWeb && isAuto) {
+        console.warn('Stream is not web-ready during auto-play, finding next web stream:', label);
+        if (state.activeStreams.some((s, idx) => idx > streamIndex && isWebPlayableStream(s))) {
+            tryNextStream(true);
             return;
         }
     }
 
-    detailTrailerIframe.style.display = 'none';
-    detailTrailerIframe.src = '';
-    detailVideoPlayer.style.display = 'block';
-
+    // Clean up previous playback safely without triggering synthetic error events
     if (hlsInstance) {
         hlsInstance.destroy();
         hlsInstance = null;
     }
+    detailVideoPlayer.onerror = null;
+    detailVideoPlayer.pause();
 
-    // Set error listener on HTML5 video element for automatic failover
-    detailVideoPlayer.onerror = (e) => {
-        console.warn('Video element playback error:', e);
-        tryNextStream();
-    };
+    detailTrailerIframe.style.display = 'none';
+    detailTrailerIframe.src = '';
+    detailVideoPlayer.style.display = 'block';
 
     const attemptPlay = () => {
         const p = detailVideoPlayer.play();
@@ -1864,10 +1865,10 @@ function playMediaStream(stream, streamIndex = 0) {
                             hlsInstance.recoverMediaError();
                             break;
                         default:
-                            console.warn('HLS Fatal Error, failing over to next stream...');
+                            console.warn('HLS Fatal unrecoverable error:', data.details);
                             if (hlsInstance) hlsInstance.destroy();
                             hlsInstance = null;
-                            tryNextStream();
+                            if (isAuto) tryNextStream(true);
                             break;
                     }
                 }
@@ -2022,7 +2023,7 @@ async function startMediaStreamPlayback(mediaItem, season = null, episode = null
                     const chosenIndex = firstPlayableIndex !== -1 ? firstPlayableIndex : 0;
                     autoPlayed = true;
                     playerLoadingOverlay.style.display = 'none';
-                    playMediaStream(state.activeStreams[chosenIndex], chosenIndex);
+                    playMediaStream(state.activeStreams[chosenIndex], chosenIndex, true);
                     detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Continue Watching</span>';
                     recordWatchProgress(currentPlaybackItem, 10);
                 }
@@ -2037,18 +2038,11 @@ async function startMediaStreamPlayback(mediaItem, season = null, episode = null
         if (!state.currentStreamSession || state.currentStreamSession.token !== sessionToken) return;
 
         if (state.activeStreams.length === 0) {
-            if (state.activeTrailerVideo) {
-                playerLoaderSubtext.textContent = 'No streams available from addons. Playing official trailer...';
-                setTimeout(() => {
-                    playTrailerVideo(state.activeTrailerVideo);
-                }, 1200);
-            } else {
-                playerLoaderSubtext.textContent = 'No streams found from addons for this title.';
-                setTimeout(() => {
-                    playerLoadingOverlay.style.display = 'none';
-                    detailPlayerSection.style.display = 'none';
-                }, 2000);
-            }
+            playerLoaderSubtext.textContent = 'No playable streams found from integrated addons for this title.';
+            setTimeout(() => {
+                playerLoadingOverlay.style.display = 'none';
+                detailPlayerSection.style.display = 'none';
+            }, 2500);
             detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Play</span>';
         }
     });
@@ -2204,7 +2198,7 @@ async function loadSeasonEpisodes(tvId, seasonNumber, showData) {
 }
 
 // --- Full Detail Screen & Media Inspection ---
-async function openModal(id, type = 'movie', directImdbId = null, autoPlayTrailer = false) {
+async function openModal(id, type = 'movie', directImdbId = null, autoStartStream = false) {
     let imdbId = directImdbId;
     let data = null;
 
@@ -2377,8 +2371,10 @@ async function openModal(id, type = 'movie', directImdbId = null, autoPlayTraile
     detailScreen.style.display = 'block';
     detailScreen.scrollTop = 0;
 
-    if (autoPlayTrailer && trailerVideo) {
-        playTrailerVideo(trailerVideo);
+    if (autoStartStream) {
+        const resumeSeason = existingProgress?.season || (type === 'tv' ? 1 : null);
+        const resumeEpisode = existingProgress?.episode || (type === 'tv' ? 1 : null);
+        startMediaStreamPlayback(data, resumeSeason, resumeEpisode);
     }
 }
 
