@@ -1248,6 +1248,34 @@ body {
     margin: 0;
 }
 
+.player-unmute-pill {
+    position: absolute;
+    bottom: 1.75rem;
+    left: 1.75rem;
+    z-index: 25;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+    padding: 0.6rem 1.25rem;
+    border-radius: 30px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+    transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.player-unmute-pill:hover {
+    transform: scale(1.05);
+    background: var(--accent);
+    color: var(--on-accent);
+}
+
 /* Body Content: Grid of Main Info & Sidebar Info */
 .detail-body-content {
     max-width: 100%;

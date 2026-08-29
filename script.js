@@ -197,9 +197,11 @@ const detailStreamSelectorWrap = document.getElementById('detail-stream-selector
 const detailStreamSelect = document.getElementById('detail-stream-select');
 const playerLoadingOverlay = document.getElementById('player-loading-overlay');
 const playerLoaderSubtext = document.getElementById('player-loader-subtext');
+const detailUnmuteBtn = document.getElementById('detail-unmute-btn');
 
 let hlsInstance = null;
 let currentPlaybackItem = null;
+let currentPlayingStreamIndex = 0;
 let streamProgressInterval = null;
 const detailCastRow = document.getElementById('detail-cast-row');
 const detailEpisodesSection = document.getElementById('detail-episodes-section');
@@ -1697,11 +1699,34 @@ async function getBestTrailer(id, type, tmdbData) {
 }
 
 // --- Streaming Playback & Addon Resolver ---
+// --- Streaming Playback & Addon Resolver ---
+function isWebPlayableStream(stream) {
+    if (!stream || !stream.url) return false;
+    if (stream.behaviorHints?.notWebReady === true) return false;
+
+    const url = (stream.url || '').toLowerCase();
+    const name = (stream.name || '').toLowerCase();
+    const title = (stream.title || '').toLowerCase();
+    const source = (stream.__sourceLabel || '').toLowerCase();
+
+    // AIOStreams / Torrentio debrid streams or unproxied torrents are not web-ready
+    if (source === 'aiostreams' || name.includes('aiostreams') || title.includes('aiostreams') || (name.includes('torrentio') && !url.includes('/proxy/'))) {
+        return false;
+    }
+    // MKV format cannot be demuxed natively by web browsers
+    if (url.includes('.mkv') || title.includes('.mkv')) {
+        return false;
+    }
+    return true;
+}
+
 function formatStreamLabel(stream, addonName) {
-    const quality = stream.quality?.height ? `${stream.quality.height}p` : (stream.title && stream.title.includes('1080p') ? '1080p' : (stream.title && stream.title.includes('720p') ? '720p' : ''));
+    const isWeb = isWebPlayableStream(stream);
+    const quality = stream.quality?.height ? `${stream.quality.height}p` : (stream.title && stream.title.includes('1080p') ? '1080p' : (stream.title && stream.title.includes('720p') ? '720p' : (stream.title && stream.title.includes('4k') ? '4K' : '')));
     const cleanTitle = (stream.title || '').replace(/\n/g, ' ').slice(0, 32);
     const source = stream.name || addonName || 'Addon';
-    return `${quality ? `[${quality}] ` : ''}${source}${cleanTitle ? ` • ${cleanTitle}` : ''}`;
+    const tag = !isWeb ? '[External] ' : (quality ? `[${quality}] ` : '');
+    return `${tag}${source}${cleanTitle ? ` • ${cleanTitle}` : ''}`;
 }
 
 function renderStreamSelector(sessionToken) {
@@ -1711,27 +1736,49 @@ function renderStreamSelector(sessionToken) {
     if (detailStreamSelectorWrap && detailStreamSelect) {
         detailStreamSelectorWrap.style.display = 'block';
         detailStreamSelect.innerHTML = state.activeStreams.map((s, idx) => `
-            <option value="${idx}">${s.__label}</option>
+            <option value="${idx}" ${idx === currentPlayingStreamIndex ? 'selected' : ''}>${s.__label}</option>
         `).join('');
 
         detailStreamSelect.onchange = () => {
             const idx = Number(detailStreamSelect.value);
             if (state.activeStreams[idx]) {
-                playMediaStream(state.activeStreams[idx]);
+                playMediaStream(state.activeStreams[idx], idx);
             }
         };
     }
 }
 
-function playMediaStream(stream) {
+function tryNextStream() {
+    const nextIndex = currentPlayingStreamIndex + 1;
+    if (nextIndex < state.activeStreams.length) {
+        console.warn(`Stream ${currentPlayingStreamIndex} failed, automatically trying next stream ${nextIndex}:`, state.activeStreams[nextIndex].__label);
+        if (detailStreamSelect) detailStreamSelect.value = String(nextIndex);
+        playMediaStream(state.activeStreams[nextIndex], nextIndex);
+    } else {
+        console.warn('All streams failed.');
+        if (state.activeTrailerVideo) {
+            playerLoaderSubtext.textContent = 'All streams failed. Playing official trailer...';
+            playerLoadingOverlay.style.display = 'flex';
+            setTimeout(() => playTrailerVideo(state.activeTrailerVideo), 1500);
+        } else {
+            playerLoaderSubtext.textContent = 'Unable to play stream. Please choose another stream from the dropdown.';
+            playerLoadingOverlay.style.display = 'flex';
+            setTimeout(() => { playerLoadingOverlay.style.display = 'none'; }, 2500);
+        }
+    }
+}
+
+function playMediaStream(stream, streamIndex = 0) {
     if (!stream || !stream.url) {
         console.warn('Invalid stream:', stream);
+        tryNextStream();
         return;
     }
 
+    currentPlayingStreamIndex = streamIndex;
     const streamUrl = stream.url;
+    const isWeb = isWebPlayableStream(stream);
     const isHLS = streamUrl.includes('.m3u8') || stream.behaviorHints?.proxyHeaders?.request?.['User-Agent'];
-    const isDirectVideo = isHLS || streamUrl.endsWith('.mp4') || streamUrl.includes('/proxy/');
 
     // External stream link button
     if (detailPlayerExternalLink) {
@@ -1740,56 +1787,103 @@ function playMediaStream(stream) {
         detailPlayerExternalLink.innerHTML = '<i class="fi fi-tr-arrow-up-right-from-square"></i> Open Stream';
     }
 
+    // Unmute button reset
+    if (detailUnmuteBtn) detailUnmuteBtn.style.display = 'none';
+
     const label = stream.__label || stream.title || stream.name || 'Playback';
     detailPlayerTitle.innerHTML = `<i class="fi fi-tr-play"></i> <span>${label}</span>`;
 
-    if (isDirectVideo) {
-        detailTrailerIframe.style.display = 'none';
-        detailTrailerIframe.src = '';
-        detailVideoPlayer.style.display = 'block';
-
-        if (hlsInstance) {
-            hlsInstance.destroy();
-            hlsInstance = null;
+    // If stream is not web-playable (e.g. Torrentio MKV / debrid), don't break the player;
+    // auto-try the next web stream if available
+    if (!isWeb) {
+        console.warn('Stream is not web-ready, checking if next stream is available:', label);
+        if (streamIndex === 0 && state.activeStreams.some((s, idx) => idx > streamIndex && isWebPlayableStream(s))) {
+            tryNextStream();
+            return;
         }
+    }
 
-        if (streamUrl.includes('.m3u8')) {
-            if (window.Hls && Hls.isSupported()) {
-                hlsInstance = new Hls({
-                    enableWorker: true,
-                    lowLatencyMode: true
-                });
-                hlsInstance.loadSource(streamUrl);
-                hlsInstance.attachMedia(detailVideoPlayer);
-                hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-                    detailVideoPlayer.play().catch(() => {});
-                });
-                hlsInstance.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) {
-                        console.warn('HLS fatal, attempting native playback');
-                        detailVideoPlayer.src = streamUrl;
-                        detailVideoPlayer.play().catch(() => {});
+    detailTrailerIframe.style.display = 'none';
+    detailTrailerIframe.src = '';
+    detailVideoPlayer.style.display = 'block';
+
+    if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+    }
+
+    // Set error listener on HTML5 video element for automatic failover
+    detailVideoPlayer.onerror = (e) => {
+        console.warn('Video element playback error:', e);
+        tryNextStream();
+    };
+
+    const attemptPlay = () => {
+        const p = detailVideoPlayer.play();
+        if (p !== undefined) {
+            p.catch((err) => {
+                console.warn('Playback play() was rejected:', err.name);
+                if (err.name === 'NotAllowedError') {
+                    // Browser blocked unmuted autoplay: start muted and show "Tap to Unmute"
+                    detailVideoPlayer.muted = true;
+                    detailVideoPlayer.play().then(() => {
+                        if (detailUnmuteBtn) {
+                            detailUnmuteBtn.style.display = 'inline-flex';
+                            detailUnmuteBtn.onclick = () => {
+                                detailVideoPlayer.muted = false;
+                                detailUnmuteBtn.style.display = 'none';
+                            };
+                        }
+                    }).catch(() => {});
+                }
+            });
+        }
+    };
+
+    if (isHLS) {
+        if (window.Hls && Hls.isSupported()) {
+            hlsInstance = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                backBufferLength: 90
+            });
+            hlsInstance.loadSource(streamUrl);
+            hlsInstance.attachMedia(detailVideoPlayer);
+            hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                attemptPlay();
+            });
+            hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    switch (data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            console.warn('HLS Network Error, attempting recovery...');
+                            hlsInstance.startLoad();
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            console.warn('HLS Media Error, attempting recovery...');
+                            hlsInstance.recoverMediaError();
+                            break;
+                        default:
+                            console.warn('HLS Fatal Error, failing over to next stream...');
+                            if (hlsInstance) hlsInstance.destroy();
+                            hlsInstance = null;
+                            tryNextStream();
+                            break;
                     }
-                });
-            } else if (detailVideoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-                // Safari native HLS
-                detailVideoPlayer.src = streamUrl;
-                detailVideoPlayer.play().catch(() => {});
-            } else {
-                detailVideoPlayer.src = streamUrl;
-                detailVideoPlayer.play().catch(() => {});
-            }
-        } else {
-            // Direct MP4 video
+                }
+            });
+        } else if (detailVideoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+            // Safari native HLS
             detailVideoPlayer.src = streamUrl;
-            detailVideoPlayer.play().catch(() => {});
+            attemptPlay();
+        } else {
+            detailVideoPlayer.src = streamUrl;
+            attemptPlay();
         }
     } else {
-        // Embed / Web URL
-        detailVideoPlayer.style.display = 'none';
-        detailVideoPlayer.pause();
-        detailTrailerIframe.style.display = 'block';
-        detailTrailerIframe.src = streamUrl;
+        // Direct MP4 or web video URL
+        detailVideoPlayer.src = streamUrl;
+        attemptPlay();
     }
 
     // Periodic watch progress recording during video playback
@@ -1824,6 +1918,7 @@ async function startMediaStreamPlayback(mediaItem, season = null, episode = null
     detailStreamSelectorWrap.style.display = 'none';
     detailStreamSelect.innerHTML = '';
     detailPlayerExternalLink.style.display = 'none';
+    if (detailUnmuteBtn) detailUnmuteBtn.style.display = 'none';
 
     // Stop previous video / iframe
     if (hlsInstance) {
@@ -1866,6 +1961,7 @@ async function startMediaStreamPlayback(mediaItem, season = null, episode = null
         episode
     };
     state.activeStreams = [];
+    currentPlayingStreamIndex = 0;
     let autoPlayed = false;
 
     // 3. Query all integrated streaming addons asynchronously
@@ -1905,18 +2001,28 @@ async function startMediaStreamPlayback(mediaItem, season = null, episode = null
                 // Annotate and append newly arrived streams
                 data.streams.forEach(s => {
                     s.__addonName = addon.name || 'Addon';
+                    s.__isWebReady = isWebPlayableStream(s);
                     s.__label = formatStreamLabel(s, addon.name);
                     state.activeStreams.push(s);
+                });
+
+                // Prioritize Web-Ready HLS/MP4 streams at the front so the first stream selected always works!
+                state.activeStreams.sort((a, b) => {
+                    if (a.__isWebReady && !b.__isWebReady) return -1;
+                    if (!a.__isWebReady && b.__isWebReady) return 1;
+                    return 0;
                 });
 
                 // Update stream switcher dropdown
                 renderStreamSelector(sessionToken);
 
-                // Auto-play the first stream found
+                // Auto-play the first web-ready stream found
                 if (!autoPlayed && state.activeStreams.length > 0) {
+                    const firstPlayableIndex = state.activeStreams.findIndex(s => s.__isWebReady);
+                    const chosenIndex = firstPlayableIndex !== -1 ? firstPlayableIndex : 0;
                     autoPlayed = true;
                     playerLoadingOverlay.style.display = 'none';
-                    playMediaStream(state.activeStreams[0]);
+                    playMediaStream(state.activeStreams[chosenIndex], chosenIndex);
                     detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Continue Watching</span>';
                     recordWatchProgress(currentPlaybackItem, 10);
                 }
@@ -1963,6 +2069,7 @@ function playTrailerVideo(video) {
         detailVideoPlayer.removeAttribute('src');
         detailVideoPlayer.style.display = 'none';
     }
+    if (detailUnmuteBtn) detailUnmuteBtn.style.display = 'none';
 
     const embedUrl = `https://www.youtube-nocookie.com/embed/${video.key}?autoplay=1&enablejsapi=1&rel=0&playsinline=1`;
     detailTrailerIframe.style.display = 'block';
@@ -2004,6 +2111,7 @@ function closeDetailScreen() {
         detailTrailerIframe.src = '';
         detailTrailerIframe.style.display = 'none';
     }
+    if (detailUnmuteBtn) detailUnmuteBtn.style.display = 'none';
     if (playerLoadingOverlay) playerLoadingOverlay.style.display = 'none';
     if (detailPlayerSection) detailPlayerSection.style.display = 'none';
     if (detailScreen) detailScreen.style.display = 'none';
