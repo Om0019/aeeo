@@ -146,7 +146,10 @@ const state = {
     activeModalItem: null,
     nuvioSession: JSON.parse(localStorage.getItem('aeeo_nuvio_session') || 'null'),
     streamingAddons: loadedStreamingAddons,
-    authMode: 'login' // 'login' | 'signup'
+    authMode: 'login', // 'login' | 'signup'
+    activeStreams: [],
+    streamSessionCounter: 0,
+    currentStreamSession: null
 };
 
 // DOM Elements
@@ -185,9 +188,19 @@ const detailPlayBtn = document.getElementById('detail-play-btn');
 const detailTrailerBtn = document.getElementById('detail-trailer-btn');
 const detailWatchlistBtn = document.getElementById('detail-watchlist-btn');
 const detailPlayerSection = document.getElementById('detail-player-section');
+const detailPlayerTitle = document.getElementById('detail-player-title');
 const detailPlayerCloseBtn = document.getElementById('detail-player-close-btn');
 const detailPlayerExternalLink = document.getElementById('detail-player-external-link');
 const detailTrailerIframe = document.getElementById('detail-trailer-iframe');
+const detailVideoPlayer = document.getElementById('detail-video-player');
+const detailStreamSelectorWrap = document.getElementById('detail-stream-selector-wrap');
+const detailStreamSelect = document.getElementById('detail-stream-select');
+const playerLoadingOverlay = document.getElementById('player-loading-overlay');
+const playerLoaderSubtext = document.getElementById('player-loader-subtext');
+
+let hlsInstance = null;
+let currentPlaybackItem = null;
+let streamProgressInterval = null;
 const detailCastRow = document.getElementById('detail-cast-row');
 const detailEpisodesSection = document.getElementById('detail-episodes-section');
 const detailSeasonSelect = document.getElementById('detail-season-select');
@@ -510,18 +523,115 @@ async function syncWatchProgressToNuvio(record) {
     }
 }
 
+async function pullNuvioWatchlist() {
+    if (!state.nuvioSession || !state.nuvioSession.access_token) return;
+
+    const headers = {
+        'apikey': NUVIO_ANON_KEY,
+        'Authorization': `Bearer ${state.nuvioSession.access_token}`,
+        'Content-Type': 'application/json'
+    };
+
+    try {
+        const res = await fetch(`${NUVIO_API_URL}/rest/v1/library_items?select=*&order=created_at.desc`, { headers });
+        if (!res.ok) return;
+
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+            const seen = new Set(state.watchlist.map(i => `${i.mediaType || 'movie'}-${i.id}`));
+
+            data.forEach(item => {
+                const mediaType = (item.content_type === 'series' || item.content_type === 'tv') ? 'tv' : 'movie';
+                const id = item.content_id || item.id;
+                const key = `${mediaType}-${id}`;
+
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    state.watchlist.unshift({
+                        id: id,
+                        imdb_id: String(id).startsWith('tt') ? id : null,
+                        title: item.name || 'Untitled',
+                        name: item.name || 'Untitled',
+                        poster_path: item.poster || null,
+                        backdrop_path: item.background || null,
+                        vote_average: item.imdb_rating || 0,
+                        release_date: item.release_info || '',
+                        mediaType: mediaType
+                    });
+                }
+            });
+
+            localStorage.setItem('aeeo_watchlist', JSON.stringify(state.watchlist));
+            updateWatchlistButtons();
+            if (state.currentView === 'watchlist') renderWatchlistView();
+        }
+    } catch (e) {
+        console.warn('Pulling Nuvio watchlist failed:', e);
+    }
+}
+
+async function syncWatchlistToNuvio(item, isAdded) {
+    if (!state.nuvioSession || !state.nuvioSession.access_token) return;
+
+    const headers = {
+        'apikey': NUVIO_ANON_KEY,
+        'Authorization': `Bearer ${state.nuvioSession.access_token}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+    };
+
+    const contentId = String(item.imdb_id || item.id);
+    const contentType = item.mediaType === 'tv' ? 'series' : 'movie';
+
+    if (isAdded) {
+        try {
+            await fetch(`${NUVIO_API_URL}/rest/v1/library_items`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    user_id: state.nuvioSession.user.id,
+                    content_id: contentId,
+                    content_type: contentType,
+                    name: getTitle(item),
+                    poster: item.poster_path ? (item.poster_path.startsWith('http') ? item.poster_path : `${IMG_POSTER}${item.poster_path}`) : null,
+                    background: item.backdrop_path ? (item.backdrop_path.startsWith('http') ? item.backdrop_path : `${IMG_BACKDROP}${item.backdrop_path}`) : null,
+                    release_info: item.release_date || item.first_air_date || '',
+                    imdb_rating: Number(item.vote_average) || 0,
+                    added_at: Date.now()
+                })
+            });
+        } catch (e) {
+            console.warn('Nuvio watchlist add failed:', e);
+        }
+    } else {
+        try {
+            await fetch(`${NUVIO_API_URL}/rest/v1/library_items?user_id=eq.${state.nuvioSession.user.id}&content_id=eq.${encodeURIComponent(contentId)}`, {
+                method: 'DELETE',
+                headers
+            });
+        } catch (e) {
+            console.warn('Nuvio watchlist remove failed:', e);
+        }
+    }
+}
+
 function isInWatchlist(id, type) {
-    return state.watchlist.some(i => i.id === id && i.mediaType === type);
+    return state.watchlist.some(i => (i.id === id || String(i.id) === String(id)) && (i.mediaType === type || !type));
 }
 
 function toggleWatchlist(item) {
     const type = getMediaType(item);
-    const index = state.watchlist.findIndex(i => i.id === item.id && i.mediaType === type);
+    const index = state.watchlist.findIndex(i => (i.id === item.id || (item.imdb_id && i.imdb_id === item.imdb_id)) && i.mediaType === type);
     
+    let isAdded = false;
+    let targetItem = null;
+
     if (index > -1) {
+        targetItem = state.watchlist[index];
         state.watchlist.splice(index, 1);
+        isAdded = false;
     } else {
-        state.watchlist.push({
+        targetItem = {
             id: item.id,
             imdb_id: item.imdb_id,
             title: getTitle(item),
@@ -530,11 +640,18 @@ function toggleWatchlist(item) {
             vote_average: item.vote_average,
             release_date: item.release_date || item.first_air_date,
             mediaType: type
-        });
+        };
+        state.watchlist.push(targetItem);
+        isAdded = true;
     }
 
     localStorage.setItem('aeeo_watchlist', JSON.stringify(state.watchlist));
     updateWatchlistButtons();
+
+    // Sync with Nuvio Cloud if user is logged in
+    if (state.nuvioSession && state.nuvioSession.access_token) {
+        syncWatchlistToNuvio(targetItem, isAdded);
+    }
 
     if (state.currentView === 'watchlist') {
         renderWatchlistView();
@@ -710,12 +827,15 @@ async function renderHomeView() {
     heroBanner.style.display = 'flex';
     sectionsContainer.innerHTML = '<div style="text-align:center; padding: 2rem;"><p>Curating your personalized stream...</p></div>';
 
-    // 1. Sync Continue Watching from Nuvio Cloud (Non-blocking)
+    // 1. Sync Continue Watching & Watchlist from Nuvio Cloud (Non-blocking)
     if (state.nuvioSession && state.nuvioSession.access_token) {
         try {
-            await pullNuvioWatchProgress();
+            await Promise.allSettled([
+                pullNuvioWatchProgress(),
+                pullNuvioWatchlist()
+            ]);
         } catch (e) {
-            console.warn('Nuvio watch progress sync skipped:', e);
+            console.warn('Nuvio sync skipped:', e);
         }
     }
 
@@ -1265,8 +1385,8 @@ async function openPersonFilmography(personId, personName) {
 
         sectionsContainer.innerHTML = `
             <div style="margin-bottom: 1.25rem;">
-                <button class="btn btn-secondary" id="actor-back-btn" style="border-radius: 30px; padding: 0.55rem 1.25rem; display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 600;">
-                    <i class="fi fi-tr-arrow-left"></i> <span>Back to Search</span>
+                <button class="page-back-btn" id="actor-back-btn" aria-label="Go Back">
+                    <i class="fi fi-tr-arrow-left"></i> <span>Back</span>
                 </button>
             </div>
             <div style="display: flex; align-items: center; gap: 2rem; margin-bottom: 2.5rem; background: rgba(255,255,255,0.03); padding: 1.75rem 2rem; border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.08);">
@@ -1576,18 +1696,286 @@ async function getBestTrailer(id, type, tmdbData) {
         || yt[0];
 }
 
+// --- Streaming Playback & Addon Resolver ---
+function formatStreamLabel(stream, addonName) {
+    const quality = stream.quality?.height ? `${stream.quality.height}p` : (stream.title && stream.title.includes('1080p') ? '1080p' : (stream.title && stream.title.includes('720p') ? '720p' : ''));
+    const cleanTitle = (stream.title || '').replace(/\n/g, ' ').slice(0, 32);
+    const source = stream.name || addonName || 'Addon';
+    return `${quality ? `[${quality}] ` : ''}${source}${cleanTitle ? ` • ${cleanTitle}` : ''}`;
+}
+
+function renderStreamSelector(sessionToken) {
+    if (!state.currentStreamSession || state.currentStreamSession.token !== sessionToken) return;
+    if (state.activeStreams.length <= 1) return;
+
+    if (detailStreamSelectorWrap && detailStreamSelect) {
+        detailStreamSelectorWrap.style.display = 'block';
+        detailStreamSelect.innerHTML = state.activeStreams.map((s, idx) => `
+            <option value="${idx}">${s.__label}</option>
+        `).join('');
+
+        detailStreamSelect.onchange = () => {
+            const idx = Number(detailStreamSelect.value);
+            if (state.activeStreams[idx]) {
+                playMediaStream(state.activeStreams[idx]);
+            }
+        };
+    }
+}
+
+function playMediaStream(stream) {
+    if (!stream || !stream.url) {
+        console.warn('Invalid stream:', stream);
+        return;
+    }
+
+    const streamUrl = stream.url;
+    const isHLS = streamUrl.includes('.m3u8') || stream.behaviorHints?.proxyHeaders?.request?.['User-Agent'];
+    const isDirectVideo = isHLS || streamUrl.endsWith('.mp4') || streamUrl.includes('/proxy/');
+
+    // External stream link button
+    if (detailPlayerExternalLink) {
+        detailPlayerExternalLink.href = streamUrl;
+        detailPlayerExternalLink.style.display = 'inline-flex';
+        detailPlayerExternalLink.innerHTML = '<i class="fi fi-tr-arrow-up-right-from-square"></i> Open Stream';
+    }
+
+    const label = stream.__label || stream.title || stream.name || 'Playback';
+    detailPlayerTitle.innerHTML = `<i class="fi fi-tr-play"></i> <span>${label}</span>`;
+
+    if (isDirectVideo) {
+        detailTrailerIframe.style.display = 'none';
+        detailTrailerIframe.src = '';
+        detailVideoPlayer.style.display = 'block';
+
+        if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+        }
+
+        if (streamUrl.includes('.m3u8')) {
+            if (window.Hls && Hls.isSupported()) {
+                hlsInstance = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true
+                });
+                hlsInstance.loadSource(streamUrl);
+                hlsInstance.attachMedia(detailVideoPlayer);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                    detailVideoPlayer.play().catch(() => {});
+                });
+                hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) {
+                        console.warn('HLS fatal, attempting native playback');
+                        detailVideoPlayer.src = streamUrl;
+                        detailVideoPlayer.play().catch(() => {});
+                    }
+                });
+            } else if (detailVideoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari native HLS
+                detailVideoPlayer.src = streamUrl;
+                detailVideoPlayer.play().catch(() => {});
+            } else {
+                detailVideoPlayer.src = streamUrl;
+                detailVideoPlayer.play().catch(() => {});
+            }
+        } else {
+            // Direct MP4 video
+            detailVideoPlayer.src = streamUrl;
+            detailVideoPlayer.play().catch(() => {});
+        }
+    } else {
+        // Embed / Web URL
+        detailVideoPlayer.style.display = 'none';
+        detailVideoPlayer.pause();
+        detailTrailerIframe.style.display = 'block';
+        detailTrailerIframe.src = streamUrl;
+    }
+
+    // Periodic watch progress recording during video playback
+    if (streamProgressInterval) clearInterval(streamProgressInterval);
+    streamProgressInterval = setInterval(() => {
+        if (!detailVideoPlayer.paused && detailVideoPlayer.duration > 0 && currentPlaybackItem) {
+            const percent = Math.round((detailVideoPlayer.currentTime / detailVideoPlayer.duration) * 100);
+            if (percent > 0 && percent <= 98) {
+                recordWatchProgress(currentPlaybackItem, percent);
+            }
+        }
+    }, 15000);
+}
+
+async function startMediaStreamPlayback(mediaItem, season = null, episode = null) {
+    currentPlaybackItem = { ...mediaItem };
+    if (season !== null && episode !== null) {
+        currentPlaybackItem.season = season;
+        currentPlaybackItem.episode = episode;
+    }
+
+    const type = getMediaType(mediaItem);
+    const title = getTitle(mediaItem);
+    const isTV = (type === 'tv');
+
+    // 1. Show Player Section & Loading UI ("Finding Streams")
+    detailPlayerSection.style.display = 'block';
+    playerLoadingOverlay.style.display = 'flex';
+    playerLoaderSubtext.textContent = 'Searching integrated streaming addons...';
+    detailPlayerTitle.innerHTML = `<i class="fi fi-tr-play"></i> <span>${title}${isTV && season ? ` (S${season}:E${episode})` : ''}</span>`;
+    detailPlayBtn.innerHTML = '<i class="fi fi-tr-spinner spinner-icon"></i> <span>Finding Streams...</span>';
+    detailStreamSelectorWrap.style.display = 'none';
+    detailStreamSelect.innerHTML = '';
+    detailPlayerExternalLink.style.display = 'none';
+
+    // Stop previous video / iframe
+    if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+    }
+    detailVideoPlayer.pause();
+    detailVideoPlayer.removeAttribute('src');
+    detailVideoPlayer.load();
+    detailVideoPlayer.style.display = 'none';
+    detailTrailerIframe.src = '';
+    detailTrailerIframe.style.display = 'none';
+
+    detailPlayerSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // 2. Resolve IMDB ID (Required for standard Stremio/FL4X addon stream scraping)
+    let imdbId = mediaItem.imdb_id;
+    if (!imdbId || !String(imdbId).startsWith('tt')) {
+        try {
+            if (isTV) {
+                const ext = await fetchTMDB(`/tv/${mediaItem.id}/external_ids`);
+                if (ext && ext.imdb_id) imdbId = ext.imdb_id;
+            } else {
+                const mov = await fetchTMDB(`/movie/${mediaItem.id}`);
+                if (mov && mov.imdb_id) imdbId = mov.imdb_id;
+            }
+        } catch (e) {
+            console.warn('Failed to resolve IMDB ID from TMDB:', e);
+        }
+    }
+
+    // Session token to prevent race conditions
+    const sessionToken = ++state.streamSessionCounter;
+    state.currentStreamSession = {
+        token: sessionToken,
+        id: mediaItem.id,
+        imdbId: imdbId || mediaItem.id,
+        type,
+        season,
+        episode
+    };
+    state.activeStreams = [];
+    let autoPlayed = false;
+
+    // 3. Query all integrated streaming addons asynchronously
+    // DO NOT abort or dictate when addons stop; each addon completes at its own pace.
+    const activeAddons = (state.streamingAddons || []).filter(a => a.enabled !== false);
+    
+    if (activeAddons.length === 0) {
+        playerLoaderSubtext.textContent = 'No streaming addons are currently enabled.';
+        setTimeout(() => {
+            if (state.activeTrailerVideo) playTrailerVideo(state.activeTrailerVideo);
+            else playerLoadingOverlay.style.display = 'none';
+        }, 1200);
+        return;
+    }
+
+    const fetchPromises = activeAddons.map(async (addon) => {
+        try {
+            const baseUrl = (addon.url || '').replace('/manifest.json', '').replace(/\/+$/, '');
+            if (!baseUrl) return;
+
+            const targetType = isTV ? 'series' : 'movie';
+            const streamId = isTV 
+                ? `${imdbId || mediaItem.id}:${season || 1}:${episode || 1}` 
+                : (imdbId || mediaItem.id);
+
+            const streamUrl = `${baseUrl}/stream/${encodeURIComponent(targetType)}/${encodeURIComponent(streamId)}.json?client=web&platform=web&isWeb=true&source=web&disableAiostreams=true`;
+
+            const res = await fetch(streamUrl);
+            if (!res.ok) return;
+
+            const data = await res.json();
+
+            // Discard if user left the screen or started another title
+            if (!state.currentStreamSession || state.currentStreamSession.token !== sessionToken) return;
+
+            if (data && Array.isArray(data.streams) && data.streams.length > 0) {
+                // Annotate and append newly arrived streams
+                data.streams.forEach(s => {
+                    s.__addonName = addon.name || 'Addon';
+                    s.__label = formatStreamLabel(s, addon.name);
+                    state.activeStreams.push(s);
+                });
+
+                // Update stream switcher dropdown
+                renderStreamSelector(sessionToken);
+
+                // Auto-play the first stream found
+                if (!autoPlayed && state.activeStreams.length > 0) {
+                    autoPlayed = true;
+                    playerLoadingOverlay.style.display = 'none';
+                    playMediaStream(state.activeStreams[0]);
+                    detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Continue Watching</span>';
+                    recordWatchProgress(currentPlaybackItem, 10);
+                }
+            }
+        } catch (err) {
+            console.warn(`Stream fetch from ${addon.name} error:`, err);
+        }
+    });
+
+    // When all addon requests finish:
+    Promise.allSettled(fetchPromises).then(() => {
+        if (!state.currentStreamSession || state.currentStreamSession.token !== sessionToken) return;
+
+        if (state.activeStreams.length === 0) {
+            if (state.activeTrailerVideo) {
+                playerLoaderSubtext.textContent = 'No streams available from addons. Playing official trailer...';
+                setTimeout(() => {
+                    playTrailerVideo(state.activeTrailerVideo);
+                }, 1200);
+            } else {
+                playerLoaderSubtext.textContent = 'No streams found from addons for this title.';
+                setTimeout(() => {
+                    playerLoadingOverlay.style.display = 'none';
+                    detailPlayerSection.style.display = 'none';
+                }, 2000);
+            }
+            detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Play</span>';
+        }
+    });
+}
+
 function playTrailerVideo(video) {
     if (!video || !video.key) {
         alert('No trailer available for this title.');
         return;
     }
+
+    if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+    }
+    if (detailVideoPlayer) {
+        detailVideoPlayer.pause();
+        detailVideoPlayer.removeAttribute('src');
+        detailVideoPlayer.style.display = 'none';
+    }
+
     const embedUrl = `https://www.youtube-nocookie.com/embed/${video.key}?autoplay=1&enablejsapi=1&rel=0&playsinline=1`;
+    detailTrailerIframe.style.display = 'block';
     detailTrailerIframe.src = embedUrl;
     detailPlayerSection.style.display = 'block';
+    playerLoadingOverlay.style.display = 'none';
+    detailStreamSelectorWrap.style.display = 'none';
+    detailPlayerTitle.innerHTML = `<i class="fi fi-tr-play"></i> <span>Trailer</span>`;
 
     if (detailPlayerExternalLink) {
         detailPlayerExternalLink.href = `https://www.youtube.com/watch?v=${video.key}`;
         detailPlayerExternalLink.style.display = 'inline-flex';
+        detailPlayerExternalLink.innerHTML = '<i class="fi fi-tr-arrow-up-right-from-square"></i> Open in YouTube';
     }
 
     detailPlayerSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1598,11 +1986,33 @@ function playTrailerVideo(video) {
 }
 
 function closeDetailScreen() {
-    if (detailTrailerIframe) detailTrailerIframe.src = '';
+    if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+    }
+    if (streamProgressInterval) {
+        clearInterval(streamProgressInterval);
+        streamProgressInterval = null;
+    }
+    if (detailVideoPlayer) {
+        detailVideoPlayer.pause();
+        detailVideoPlayer.removeAttribute('src');
+        detailVideoPlayer.load();
+        detailVideoPlayer.style.display = 'none';
+    }
+    if (detailTrailerIframe) {
+        detailTrailerIframe.src = '';
+        detailTrailerIframe.style.display = 'none';
+    }
+    if (playerLoadingOverlay) playerLoadingOverlay.style.display = 'none';
     if (detailPlayerSection) detailPlayerSection.style.display = 'none';
     if (detailScreen) detailScreen.style.display = 'none';
+
     state.activeModalItem = null;
     state.activeTrailerVideo = null;
+    state.activeStreams = [];
+    state.currentStreamSession = null;
+    currentPlaybackItem = null;
 }
 
 // --- TV Episodes Loader with Poster and Details ---
@@ -1675,12 +2085,7 @@ async function loadSeasonEpisodes(tvId, seasonNumber, showData) {
                     still_path: epObj ? epObj.still_path : null
                 };
                 recordWatchProgress(progressItem, 10);
-
-                if (state.activeTrailerVideo) {
-                    playTrailerVideo(state.activeTrailerVideo);
-                } else {
-                    alert(`Selected: ${fullEpTitle}`);
-                }
+                startMediaStreamPlayback(showData, Number(sNum), Number(eNum));
             });
         });
         detailEpisodesList.scrollLeft = 0;
@@ -1843,16 +2248,11 @@ async function openModal(id, type = 'movie', directImdbId = null, autoPlayTraile
         detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Play</span>';
     }
 
-    // Play / Continue Watching Button Handler
+    // Play / Continue Watching Button Handler -> Streams from integrated addons
     detailPlayBtn.onclick = () => {
-        if (trailerVideo) {
-            playTrailerVideo(trailerVideo);
-        } else {
-            alert(`Playback ready for: ${title}`);
-        }
-        const currentProgress = existingProgress ? Math.min(existingProgress.progress + 10, 95) : 15;
-        recordWatchProgress(existingProgress || data, currentProgress);
-        detailPlayBtn.innerHTML = '<i class="fi fi-tr-play"></i> <span>Continue Watching</span>';
+        const resumeSeason = existingProgress?.season || (type === 'tv' ? 1 : null);
+        const resumeEpisode = existingProgress?.episode || (type === 'tv' ? 1 : null);
+        startMediaStreamPlayback(data, resumeSeason, resumeEpisode);
     };
 
     detailTrailerBtn.onclick = () => {
@@ -1878,8 +2278,26 @@ async function openModal(id, type = 'movie', directImdbId = null, autoPlayTraile
 if (detailBackBtn) detailBackBtn.onclick = closeDetailScreen;
 if (detailPlayerCloseBtn) {
     detailPlayerCloseBtn.onclick = () => {
-        detailTrailerIframe.src = '';
-        detailPlayerSection.style.display = 'none';
+        if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+        }
+        if (streamProgressInterval) {
+            clearInterval(streamProgressInterval);
+            streamProgressInterval = null;
+        }
+        if (detailVideoPlayer) {
+            detailVideoPlayer.pause();
+            detailVideoPlayer.removeAttribute('src');
+            detailVideoPlayer.load();
+            detailVideoPlayer.style.display = 'none';
+        }
+        if (detailTrailerIframe) {
+            detailTrailerIframe.src = '';
+            detailTrailerIframe.style.display = 'none';
+        }
+        if (playerLoadingOverlay) playerLoadingOverlay.style.display = 'none';
+        if (detailPlayerSection) detailPlayerSection.style.display = 'none';
     };
 }
 
@@ -1979,6 +2397,9 @@ async function handleNuvioAuth(e) {
             state.nuvioSession = data;
             localStorage.setItem('aeeo_nuvio_session', JSON.stringify(data));
 
+            pullNuvioWatchProgress();
+            pullNuvioWatchlist();
+
             authSuccessMsg.textContent = 'Successfully logged in!';
             authSuccessMsg.style.display = 'block';
             
@@ -1988,6 +2409,8 @@ async function handleNuvioAuth(e) {
                     renderProfileView();
                 } else if (state.currentView === 'home') {
                     renderHomeView();
+                } else if (state.currentView === 'watchlist') {
+                    renderWatchlistView();
                 }
             }, 800);
         }

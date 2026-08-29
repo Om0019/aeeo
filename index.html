@@ -162,25 +162,37 @@
             </div>
         </div>
 
-        <!-- Video Player Section (opens smoothly when Play / Watch Trailer is clicked) -->
+        <!-- Video Player Section (opens smoothly when Play / Continue Watching / Watch Trailer is clicked) -->
         <div class="detail-player-section" id="detail-player-section" style="display: none;">
             <div class="detail-player-header">
                 <h3 class="detail-player-title" id="detail-player-title">
-                    <i class="fi fi-tr-play"></i> Trailer
+                    <i class="fi fi-tr-play"></i> Player
                 </h3>
                 <div class="detail-player-controls">
+                    <div id="detail-stream-selector-wrap" class="stream-selector-wrap" style="display: none;">
+                        <select id="detail-stream-select" class="stream-select" aria-label="Select Stream"></select>
+                    </div>
                     <a id="detail-player-external-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display: none;">
-                        <i class="fi fi-tr-arrow-up-right-from-square"></i> Open in YouTube
+                        <i class="fi fi-tr-arrow-up-right-from-square"></i> Open Stream
                     </a>
                     <button class="btn btn-icon btn-sm" id="detail-player-close-btn" title="Close Player">
                         <i class="fi fi-tr-cross"></i>
                     </button>
                 </div>
             </div>
-            <div class="detail-player-frame-wrap">
+            <div class="detail-player-frame-wrap" id="detail-player-frame-wrap">
+                <!-- Native / HLS.js Video Player -->
+                <video id="detail-video-player" controls playsinline style="display: none; width: 100%; height: 100%; background: #000;"></video>
+                <!-- Embedded Web / YouTube Player -->
                 <iframe id="detail-trailer-iframe" 
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen" 
                         allowfullscreen="true"></iframe>
+                <!-- Stream Loading Overlay ("Finding Streams...") -->
+                <div id="player-loading-overlay" class="player-loading-overlay" style="display: none;">
+                    <div class="player-loader-spinner"></div>
+                    <h4 class="player-loader-heading">Finding Streams</h4>
+                    <p class="player-loader-subtext" id="player-loader-subtext">Searching integrated streaming addons...</p>
+                </div>
             </div>
         </div>
 
@@ -295,6 +307,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="script.js"></script>
 </body>
 </html>

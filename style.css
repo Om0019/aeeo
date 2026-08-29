@@ -886,11 +886,8 @@ body {
     z-index: 500;
 }
 
+.page-back-btn,
 .detail-back-btn {
-    position: absolute;
-    top: 1.75rem;
-    left: 1.75rem;
-    z-index: 20;
     display: inline-flex;
     align-items: center;
     gap: 0.6rem;
@@ -906,8 +903,22 @@ body {
     cursor: pointer;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     transition: all 0.2s ease;
+    user-select: none;
 }
 
+.detail-back-btn {
+    position: absolute;
+    top: 1.75rem;
+    left: 1.75rem;
+    z-index: 20;
+}
+
+.page-back-btn {
+    position: relative;
+    margin-bottom: 1.75rem;
+}
+
+.page-back-btn:hover,
 .detail-back-btn:hover {
     background-color: var(--accent);
     color: var(--on-accent);
@@ -1142,6 +1153,39 @@ body {
     border-radius: 20px;
 }
 
+.stream-selector-wrap {
+    position: relative;
+}
+
+.stream-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    padding: 0.4rem 2rem 0.4rem 0.9rem;
+    border-radius: 20px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23f2a9c3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    outline: none;
+    max-width: 240px;
+    transition: all 0.2s ease;
+}
+
+.stream-select:hover, .stream-select:focus {
+    background-color: rgba(255, 255, 255, 0.16);
+    border-color: var(--accent);
+}
+
+.stream-select option {
+    background-color: #18181b;
+    color: #ffffff;
+}
+
 .detail-player-frame-wrap {
     position: relative;
     width: 100%;
@@ -1153,6 +1197,7 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.detail-player-frame-wrap video,
 .detail-player-frame-wrap iframe {
     position: absolute;
     top: 0;
@@ -1160,6 +1205,47 @@ body {
     width: 100%;
     height: 100%;
     border: none;
+}
+
+.player-loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(12, 12, 16, 0.92);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 2rem;
+    text-align: center;
+}
+
+.player-loader-spinner {
+    width: 44px;
+    height: 44px;
+    border: 3px solid rgba(242, 169, 195, 0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 1.25rem;
+}
+
+.player-loader-heading {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 0.35rem;
+    letter-spacing: 0.3px;
+}
+
+.player-loader-subtext {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    max-width: 420px;
+    line-height: 1.4;
+    margin: 0;
 }
 
 /* Body Content: Grid of Main Info & Sidebar Info */
